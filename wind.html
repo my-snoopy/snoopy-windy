@@ -1,0 +1,2533 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>snoopy-windy · GPX 바람 분석</title>
+<meta name="description" content="snoopy-windy — GPX 코스의 시간대별 바람·고도·속도·날씨를 분석합니다">
+
+<!-- PWA: 일반 -->
+<meta name="theme-color" content="#2563eb">
+<meta name="color-scheme" content="light">
+<meta name="mobile-web-app-capable" content="yes">
+
+<!-- PWA: iOS Safari -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="snoopy-windy">
+
+<!-- 아이콘 (SVG data URI — 자전거 + 바람) -->
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='32' fill='%232563eb'/%3E%3Cg stroke='%23ffffff' stroke-width='10' fill='none' stroke-linecap='round'%3E%3Cpath d='M28 70 Q70 56 110 70 T172 78'/%3E%3Cpath d='M28 100 Q70 86 110 100 T172 108'/%3E%3Cpath d='M28 130 Q70 116 110 130 T172 138'/%3E%3C/g%3E%3C/svg%3E">
+<link rel="apple-touch-icon" href="data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='32' fill='%232563eb'/%3E%3Cg stroke='%23ffffff' stroke-width='10' fill='none' stroke-linecap='round'%3E%3Cpath d='M28 70 Q70 56 110 70 T172 78'/%3E%3Cpath d='M28 100 Q70 86 110 100 T172 108'/%3E%3Cpath d='M28 130 Q70 116 110 130 T172 138'/%3E%3C/g%3E%3C/svg%3E">
+
+<!-- PWA Manifest (JS로 Blob URL 주입) -->
+<link rel="manifest" id="pwa-manifest">
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif; color:#222;
+         height:100vh; display:flex; flex-direction:column; overflow:hidden; }
+  #panel, #gauge, #stats, #elevation, #elevResizer { flex-shrink:0; }
+  #map { flex:1; min-height:120px; }
+  #panel {
+    padding: 14px 20px;
+    background: #ffffff;
+    border-bottom: 1px solid #e5e7eb;
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    box-shadow: 0 1px 3px rgba(15,23,42,0.04);
+  }
+  /* 입력과 버튼 그룹 사이 강제 줄바꿈 */
+  .panel-break {
+    flex-basis: 100%;
+    height: 0;
+    margin: 0;
+  }
+  #panel label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    color: #64748b;
+  }
+  #panel input,
+  #panel select {
+    padding: 8px 12px;
+    font: inherit;
+    font-size: 13.5px;
+    font-weight: 500;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    background: #f8fafc;
+    color: #0f172a;
+    outline: none;
+    transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+    min-width: 0;
+  }
+  #panel input[type="number"] { width: 96px; }
+  #panel input[type="file"] {
+    font-size: 12px;
+    padding: 6px 8px;
+    background: transparent;
+    border: 1px dashed #cbd5e1;
+    cursor: pointer;
+    color: #475569;
+  }
+  #panel input[type="file"]::file-selector-button {
+    padding: 4px 10px; margin-right: 8px;
+    font-weight: 600; font-size: 12px;
+    background: #eef2ff; color: #4338ca;
+    border: 1px solid #c7d2fe; border-radius: 6px; cursor: pointer;
+  }
+  #panel input:hover,
+  #panel select:hover { border-color: #cbd5e1; background: #fff; }
+  #panel input:focus,
+  #panel select:focus {
+    border-color: #3b82f6;
+    background: #fff;
+    box-shadow: 0 0 0 3px rgba(59,130,246,0.18);
+  }
+  #panel select {
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath fill='none' stroke='%2364748b' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round' d='M3 4.5L6 7.5L9 4.5'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    background-size: 12px;
+    padding-right: 30px;
+  }
+  #panel button {
+    height: 36px;
+    padding: 0 22px;
+    font-size: 13.5px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    line-height: 1;
+    color: #ffffff;
+    background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    box-shadow: 0 2px 6px rgba(37,99,235,0.3), inset 0 1px 0 rgba(255,255,255,0.18);
+    transition: transform 0.1s ease, box-shadow 0.15s ease, filter 0.15s;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  #panel button:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 5px 12px rgba(37,99,235,0.4), inset 0 1px 0 rgba(255,255,255,0.18);
+    filter: brightness(1.05);
+  }
+  #panel button:active { transform: translateY(0); filter: brightness(0.96); }
+  #panel button:disabled {
+    background: #94a3b8; cursor: wait; transform: none;
+    box-shadow: none; filter: none;
+  }
+  #status {
+    align-self: center;
+    color: #64748b;
+    font-size: 12.5px;
+    font-weight: 500;
+    padding: 6px 10px;
+    background: #f1f5f9;
+    border-radius: 6px;
+  }
+
+  #gauge {
+    padding:10px 14px; background:#1a1a1a; color:#fff;
+    display:flex; align-items:center; gap:14px;
+    font-size:13px; font-weight:700; letter-spacing:0.4px;
+  }
+  #gauge .bar {
+    flex:1; height:10px; border-radius:5px;
+    background: linear-gradient(to right, #00c8f0 0%, #6a5acd 50%, #ec0867 100%);
+  }
+  #gauge .tail-pct { color:#00c8f0; min-width:170px; text-align:left; }
+  #gauge .head-pct { color:#ec0867; min-width:170px; text-align:right; }
+
+  #stats {
+    display:flex; gap:10px; padding:8px 14px; font-size:13px;
+    background:#fff; border-bottom:1px solid #eee; flex-wrap:wrap; align-items:center;
+  }
+  .stat-pill { display:inline-block; padding:2px 8px; border-radius:10px; background:#eef; }
+
+  #findBestTime {
+    height:36px; padding:0 18px; font-size:13.5px; font-weight:700; letter-spacing:0.3px;
+    line-height:1;
+    background:linear-gradient(135deg,#10b981,#059669); color:#fff;
+    border:none; border-radius:8px; cursor:pointer;
+    box-shadow:0 2px 6px rgba(16,185,129,0.3), inset 0 1px 0 rgba(255,255,255,0.18);
+    transition:transform 0.1s ease, box-shadow 0.15s ease, filter 0.15s;
+    display:inline-flex; align-items:center; justify-content:center;
+  }
+  #findBestTime:hover:not(:disabled) {
+    transform:translateY(-1px);
+    box-shadow:0 5px 12px rgba(16,185,129,0.4), inset 0 1px 0 rgba(255,255,255,0.18);
+    filter:brightness(1.05);
+  }
+  #findBestTime:active { transform:translateY(0); filter:brightness(0.96); }
+  #findBestTime:disabled { background:#94a3b8; cursor:not-allowed; transform:none; box-shadow:none; }
+  #bestResult { color:#059669; font-weight:700; font-size:12.5px; align-self:center; }
+
+  #aiPrompt {
+    height:36px; padding:0 18px; font-size:13.5px; font-weight:700; letter-spacing:0.3px;
+    line-height:1;
+    background:linear-gradient(135deg,#a855f7,#7c3aed); color:#fff;
+    border:none; border-radius:8px; cursor:pointer;
+    box-shadow:0 2px 6px rgba(124,58,237,0.3), inset 0 1px 0 rgba(255,255,255,0.18);
+    transition:transform 0.1s ease, box-shadow 0.15s ease, filter 0.15s;
+    display:inline-flex; align-items:center; justify-content:center;
+  }
+
+  #useCurrentLoc {
+    height:36px; padding:0 16px; font-size:13.5px; font-weight:700; letter-spacing:0.3px;
+    line-height:1;
+    background:linear-gradient(135deg,#f59e0b,#d97706); color:#fff;
+    border:none; border-radius:8px; cursor:pointer;
+    box-shadow:0 2px 6px rgba(217,119,6,0.3), inset 0 1px 0 rgba(255,255,255,0.18);
+    transition:transform 0.1s ease, box-shadow 0.15s ease, filter 0.15s;
+    display:inline-flex; align-items:center; justify-content:center;
+  }
+  #useCurrentLoc:hover { transform:translateY(-1px); filter:brightness(1.05); }
+  #useCurrentLoc:active { transform:translateY(0); filter:brightness(0.96); }
+  #useCurrentLoc:disabled { background:#94a3b8; cursor:wait; transform:none; box-shadow:none; }
+
+  #trackToggle {
+    height:36px; padding:0 16px; font-size:13.5px; font-weight:700; letter-spacing:0.3px;
+    line-height:1;
+    background:linear-gradient(135deg,#06b6d4,#0891b2); color:#fff;
+    border:none; border-radius:8px; cursor:pointer;
+    box-shadow:0 2px 6px rgba(6,182,212,0.3), inset 0 1px 0 rgba(255,255,255,0.18);
+    transition:transform 0.1s ease, box-shadow 0.15s ease, filter 0.15s, background 0.2s;
+    display:inline-flex; align-items:center; justify-content:center;
+  }
+  #trackToggle:hover { transform:translateY(-1px); filter:brightness(1.05); }
+  #trackToggle.active {
+    background:linear-gradient(135deg,#ef4444,#dc2626);
+    box-shadow:0 2px 6px rgba(220,38,38,0.4), inset 0 1px 0 rgba(255,255,255,0.18);
+    animation:trackPulse 1.6s ease-in-out infinite;
+  }
+  @keyframes trackPulse {
+    0%, 100% { box-shadow:0 2px 6px rgba(220,38,38,0.4), inset 0 1px 0 rgba(255,255,255,0.18); }
+    50%      { box-shadow:0 2px 14px rgba(220,38,38,0.7), inset 0 1px 0 rgba(255,255,255,0.18); }
+  }
+
+  #compassToggle {
+    height:36px; padding:0 16px; font-size:13.5px; font-weight:700; letter-spacing:0.3px;
+    line-height:1;
+    background:linear-gradient(135deg,#8b5cf6,#6d28d9); color:#fff;
+    border:none; border-radius:8px; cursor:pointer;
+    box-shadow:0 2px 6px rgba(109,40,217,0.3), inset 0 1px 0 rgba(255,255,255,0.18);
+    transition:transform 0.1s ease, box-shadow 0.15s ease, filter 0.15s, background 0.2s;
+    display:inline-flex; align-items:center; justify-content:center;
+  }
+  #compassToggle:hover { transform:translateY(-1px); filter:brightness(1.05); }
+  #compassToggle.active {
+    background:linear-gradient(135deg,#0ea5e9,#0369a1);
+    box-shadow:0 2px 10px rgba(3,105,161,0.5), inset 0 1px 0 rgba(255,255,255,0.18);
+  }
+  #compassToggle:disabled { background:#94a3b8; cursor:wait; transform:none; box-shadow:none; }
+
+  #elevToggle {
+    height:36px; padding:0 16px; font-size:13.5px; font-weight:700; letter-spacing:0.3px;
+    line-height:1;
+    background:linear-gradient(135deg,#475569,#334155); color:#fff;
+    border:none; border-radius:8px; cursor:pointer;
+    box-shadow:0 2px 6px rgba(51,65,85,0.3), inset 0 1px 0 rgba(255,255,255,0.18);
+    transition:transform 0.1s ease, filter 0.15s;
+    display:inline-flex; align-items:center; justify-content:center;
+  }
+  #elevToggle:hover { transform:translateY(-1px); filter:brightness(1.1); }
+  #elevation.hidden, #elevResizer.hidden { display:none !important; }
+  #aiPrompt:hover:not(:disabled) {
+    transform:translateY(-1px);
+    box-shadow:0 5px 12px rgba(124,58,237,0.4), inset 0 1px 0 rgba(255,255,255,0.18);
+    filter:brightness(1.05);
+  }
+  #aiPrompt:active { transform:translateY(0); filter:brightness(0.96); }
+  #aiPrompt:disabled { background:#94a3b8; cursor:not-allowed; transform:none; box-shadow:none; }
+
+  /* 모달 */
+  .modal-overlay {
+    position:fixed; inset:0; background:rgba(15,23,42,0.55); z-index:9999;
+    display:flex; align-items:center; justify-content:center;
+    backdrop-filter:blur(2px);
+  }
+  .modal {
+    background:#ffffff; border-radius:14px; max-width:760px; width:92%;
+    max-height:90vh; display:flex; flex-direction:column;
+    box-shadow:0 16px 48px rgba(0,0,0,0.35);
+    animation:modalIn 0.18s ease-out;
+  }
+  @keyframes modalIn {
+    from { opacity:0; transform:translateY(8px); }
+    to   { opacity:1; transform:translateY(0); }
+  }
+  .modal-header {
+    padding:16px 22px; border-bottom:1px solid #e5e7eb;
+    display:flex; align-items:center; justify-content:space-between;
+  }
+  .modal-header h3 { margin:0; font-size:16px; font-weight:700; color:#0f172a; }
+  .modal-close {
+    background:none; border:none; font-size:22px; cursor:pointer;
+    color:#64748b; padding:0; width:32px; height:32px; border-radius:6px;
+    line-height:1;
+  }
+  .modal-close:hover { background:#f1f5f9; color:#0f172a; }
+  .modal-body { padding:14px 22px; overflow:auto; flex:1; }
+  .modal-hint { color:#64748b; font-size:12.5px; margin:0 0 10px; line-height:1.5; }
+  .modal-body textarea {
+    width:100%; box-sizing:border-box;
+    border:1px solid #e5e7eb; border-radius:8px;
+    padding:12px 14px;
+    font:13px ui-monospace,SF Mono,Menlo,Consolas,monospace;
+    line-height:1.55;
+    resize:vertical; min-height:320px;
+    background:#f8fafc; color:#0f172a; outline:none;
+  }
+  .modal-body textarea:focus { border-color:#3b82f6; box-shadow:0 0 0 3px rgba(59,130,246,0.18); }
+  .modal-footer {
+    padding:14px 22px; border-top:1px solid #e5e7eb;
+    display:flex; gap:12px; align-items:center;
+  }
+  .modal-action {
+    padding:9px 18px; font-size:13.5px; font-weight:700;
+    background:linear-gradient(135deg,#3b82f6,#2563eb); color:#fff;
+    border:none; border-radius:8px; cursor:pointer;
+    box-shadow:0 2px 6px rgba(37,99,235,0.3);
+    transition:transform 0.1s, box-shadow 0.15s, filter 0.15s, background 0.2s;
+  }
+  .modal-action:hover { transform:translateY(-1px); filter:brightness(1.05); }
+  .modal-action.copied { background:linear-gradient(135deg,#10b981,#059669); }
+  .modal-link {
+    margin-left:auto; color:#3b82f6; font-size:13px; font-weight:600;
+    text-decoration:none;
+  }
+  .modal-link:hover { text-decoration:underline; }
+  .modal-link + .modal-link { margin-left:14px; }
+
+  #map { background:#eaeaea; overflow:hidden; }
+  #map .leaflet-container { transition: transform 0.5s cubic-bezier(0.2, 0, 0.2, 1); transform-origin: center center; }
+
+  #elevResizer {
+    height:7px; background:#e6e6e6; cursor:row-resize;
+    border-top:1px solid #c8c8c8; border-bottom:1px solid #c8c8c8;
+    position:relative; transition:background 0.15s;
+  }
+  #elevResizer:hover, #elevResizer.active { background:#b8d4f0; }
+  #elevResizer::before {
+    content:''; position:absolute; left:50%; top:2px;
+    width:42px; height:3px; background:#999; border-radius:2px;
+    transform:translateX(-50%);
+  }
+
+  #elevation {
+    height:180px; background:#fafafa; border-top:1px solid #ddd;
+    position:relative; overflow:hidden; min-height:80px;
+  }
+  #elevation svg { width:100%; height:100%; display:block; }
+  .elev-tooltip {
+    position:absolute; pointer-events:none;
+    top:6px; left:50%; transform:translateX(-50%);
+    padding:7px 16px; background:rgba(26,26,26,0.94); color:#fff;
+    font-size:13px; font-weight:600; border-radius:6px;
+    white-space:nowrap; display:none; z-index:10;
+    box-shadow:0 2px 10px rgba(0,0,0,0.35);
+  }
+  .elev-tooltip .sep { color:#666; margin:0 8px; }
+  .elev-tooltip .tail { color:#00c8f0; }
+  .elev-tooltip .head { color:#ec0867; }
+  .elev-tooltip .v   { color:#7ab8ff; }
+  .elev-tooltip .e   { color:#ddd; }
+  .elev-empty {
+    padding:20px; color:#888; font-size:13px; text-align:center;
+  }
+
+  /* 추적 모드 마커 툴팁 (영구 표시, 마커 아래) */
+  .leaflet-tooltip.track-tooltip {
+    background: rgba(15,23,42,0.92);
+    color:#fff;
+    border:none;
+    padding:8px 12px;
+    font-size:12.5px;
+    font-weight:600;
+    border-radius:8px;
+    box-shadow:0 4px 12px rgba(0,0,0,0.3);
+    white-space:nowrap;
+    line-height:1.6;
+  }
+  .leaflet-tooltip-bottom.track-tooltip::before { border-bottom-color: rgba(15,23,42,0.92); }
+  .track-tooltip .lbl { color:#94a3b8; margin-right:4px; }
+  .track-tooltip .tail { color:#3b82f6; }
+  .track-tooltip .head { color:#ef4444; }
+
+  /* 현재 GPS 위치 마커 (펄스 애니메이션) — 색상은 CSS 변수로 동적 */
+  .current-loc-marker {
+    width:18px; height:18px; border-radius:50%;
+    background: var(--loc-color, #3b82f6);
+    border:3px solid #fff;
+    box-shadow: 0 0 0 2px var(--loc-color, #3b82f6), 0 2px 8px rgba(0,0,0,0.4);
+    position:relative; pointer-events:none;
+    transition: background 0.4s ease, box-shadow 0.4s ease;
+  }
+  .current-loc-marker::before,
+  .current-loc-marker::after {
+    content:''; position:absolute; inset:-3px;
+    border-radius:50%;
+    background: var(--loc-pulse, rgba(59,130,246,0.45));
+    animation:locPulse 2s ease-out infinite;
+    pointer-events:none;
+  }
+  .current-loc-marker::after { animation-delay:1s; }
+  @keyframes locPulse {
+    0%   { transform:scale(0.6); opacity:0.7; }
+    100% { transform:scale(3.2); opacity:0; }
+  }
+
+  /* 마우스 오버 시 지도에 표시되는 풍 흐름 애니메이션 (경량화) */
+  .wind-anim { position:relative; width:100px; height:100px; pointer-events:none; }
+  .wind-particle {
+    position:absolute; left:50%; top:50%;
+    width:22px; height:3px; border-radius:2px;
+    background: linear-gradient(to right, rgba(25,118,210,0), rgba(25,118,210,0.95));
+    box-shadow: 0 0 4px rgba(25,118,210,0.5);
+    transform-origin: 50% 50%;
+    animation: windflow 1.4s linear infinite;
+    will-change: transform, opacity;
+  }
+  .wind-particle:nth-child(1) { animation-delay: 0s; }
+  .wind-particle:nth-child(2) { animation-delay: 0.7s; }
+  @keyframes windflow {
+    0%   { opacity:0; transform: translate(-50%,-50%) rotate(var(--wind-rot,0deg)) translateX(-36px); }
+    20%  { opacity:1; }
+    80%  { opacity:1; }
+    100% { opacity:0; transform: translate(-50%,-50%) rotate(var(--wind-rot,0deg)) translateX(36px); }
+  }
+
+  /* 그래프 호버 시 데이터 포인트 라벨 (가독성 위해 흰색 외곽선) */
+  .elev-label {
+    font-size:12px; font-weight:700; pointer-events:none;
+    paint-order: stroke fill; stroke:#fff; stroke-width:3px; stroke-linejoin:round;
+  }
+
+  /* 브랜드 = 입력 폼 접기/펼치기 토글 (좌측 상단) */
+  /*  selector 강도를 #panel button (1,0,1)보다 높게 (1,0,2) */
+  #panel button.brand {
+    order: -2;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: transparent;
+    border: 1px solid transparent;
+    color: #1e3a8a;
+    font: inherit;
+    font-weight: 800;
+    font-size: 15px;
+    letter-spacing: -0.4px;
+    padding: 0 8px;
+    height: 36px;
+    border-radius: 8px;
+    cursor: pointer;
+    box-shadow: none;
+    transition: background 0.15s, border-color 0.15s;
+  }
+  #panel button.brand:hover { background: #f1f5f9; border-color: #e2e8f0; transform: none; filter: none; }
+  #panel button.brand:active { background: #e2e8f0; transform: none; filter: none; }
+  /* 접힌 상태: 살짝 강조 */
+  #panel.collapsed button.brand {
+    background: #eef4ff;
+    border-color: #bfdbfe;
+    color: #1e3a8a;
+  }
+  .brand-icon { font-size: 17px; line-height: 1; }
+  .brand-text { line-height: 1; }
+  .brand-dot  { color: #3b82f6; opacity: 0.7; margin: 0 1px; }
+  /* 접힘/추적 모드에서도 브랜드는 항상 보이게 */
+  #panel.collapsed > .brand,
+  #panel.tracking  > .brand { display: inline-flex !important; }
+
+  /* 입력 폼 접기 모드 — 라벨 + break 숨김 */
+  #panel.collapsed > label,
+  #panel.collapsed > .panel-break { display: none !important; }
+
+  /* 접기 모드 + 추적 모드 — 분석/현재위치/최적시각/AI 프롬프트 버튼 숨김 (화면 정리) */
+  #panel:is(.tracking, .collapsed) #run,
+  #panel:is(.tracking, .collapsed) #useCurrentLoc,
+  #panel:is(.tracking, .collapsed) #findBestTime,
+  #panel:is(.tracking, .collapsed) #aiPrompt { display: none !important; }
+
+  /* ===== 모바일 (<= 768px) ===== */
+  @media (max-width: 768px) {
+    #panel {
+      padding:8px 10px; gap:6px 6px;
+      box-shadow:none; border-bottom:1px solid #e2e8f0;
+    }
+    #panel label { font-size:9.5px; gap:2px; }
+    /* iOS 자동 줌 방지: input/select 16px 이상 */
+    #panel input,
+    #panel select {
+      font-size:16px; padding:5px 8px; height:32px;
+      border-radius:6px;
+    }
+    #panel input[type="number"] { width:64px; }
+    #panel input[type="datetime-local"] { width:170px; }
+    #panel input[type="file"] {
+      font-size:11px; padding:3px 6px; height:28px;
+      max-width:170px;
+    }
+    #panel input[type="file"]::file-selector-button {
+      padding:2px 6px; font-size:11px; margin-right:4px;
+    }
+    #panel button {
+      height:32px; padding:0 12px; font-size:12.5px;
+      border-radius:6px;
+    }
+    #panel button > * { display:inline; }
+    #panel button.brand { font-size:13.5px; height:32px; padding:0 6px; gap:4px; }
+    .brand-icon { font-size:15px; }
+    #status {
+      font-size:11px; padding:4px 8px;
+      flex-basis:100%; margin-top:2px;
+    }
+    #bestResult { font-size:11px; flex-basis:100%; }
+    #findBestTime, #aiPrompt { padding:0 10px; }
+    #gauge { padding:6px 10px; gap:8px; font-size:10.5px; }
+    #gauge .tail-pct, #gauge .head-pct { min-width:110px; }
+    #stats { gap:4px; padding:5px 8px; font-size:11px; }
+    .stat-pill { padding:1px 6px; font-size:11px; }
+    .wind-anim { width:80px; height:80px; }
+    .wind-particle { width:18px; height:3px; }
+    @keyframes windflow {
+      0%   { opacity:0; transform: translate(-50%,-50%) rotate(var(--wind-rot,0deg)) translateX(-28px); }
+      20%  { opacity:1; }
+      80%  { opacity:1; }
+      100% { opacity:0; transform: translate(-50%,-50%) rotate(var(--wind-rot,0deg)) translateX(28px); }
+    }
+    .elev-label { font-size:11px; }
+    #elevResizer { height:11px; }
+    #elevResizer::before { top:4px; }
+    .leaflet-tooltip.track-tooltip { font-size:11.5px; padding:6px 10px; }
+  }
+
+  /* 지도 위 호버 툴팁 (그래프 호버 시) */
+  .leaflet-tooltip.map-hover-tooltip {
+    background: rgba(0,0,0,0.88); color:#fff; border:none;
+    font-size:12px; font-weight:600; padding:6px 10px;
+    box-shadow:0 2px 8px rgba(0,0,0,0.4); border-radius:4px;
+    white-space:nowrap;
+  }
+  .leaflet-tooltip-top.map-hover-tooltip::before { border-top-color: rgba(0,0,0,0.88); }
+  .map-hover-tooltip .sep  { color:#666; margin:0 6px; }
+  .map-hover-tooltip .tail { color:#00c8f0; }
+  .map-hover-tooltip .head { color:#ec0867; }
+  .map-hover-tooltip .v    { color:#7ab8ff; }
+
+  .arrow-icon {
+    width:18px; height:18px; display:flex; align-items:center; justify-content:center;
+    font-size:14px; color:#1a1a1a; text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 3px #fff;
+    pointer-events:none;
+  }
+  .start-dot {
+    width:14px; height:14px; border-radius:50%;
+    background:#27ae60; border:2px solid #fff; box-shadow:0 0 4px rgba(0,0,0,0.4);
+  }
+  .end-flag { font-size:18px; text-shadow:0 0 3px #fff,0 0 3px #fff; }
+  .temp-label {
+    font-size:11px; font-weight:700; color:#fff; background:rgba(0,0,0,0.65);
+    padding:1px 5px; border-radius:3px; white-space:nowrap;
+  }
+</style>
+</head>
+<body>
+
+<div id="panel">
+  <button class="brand" id="brandToggle" type="button" title="snoopy-windy — 클릭하면 입력 폼을 접거나 펼칩니다">
+    <span class="brand-icon" aria-hidden="true">🌬</span>
+    <span class="brand-text">snoopy<span class="brand-dot">-</span>windy</span>
+  </button>
+  <label>GPX 파일
+    <input type="file" id="gpx" accept=".gpx,application/gpx+xml">
+  </label>
+  <label>출발 시각
+    <input type="datetime-local" id="startTime">
+  </label>
+  <label>방향
+    <select id="direction">
+      <option value="forward" selected>정방향</option>
+      <option value="reverse">역방향</option>
+      <option value="round">왕복</option>
+    </select>
+  </label>
+  <label>입력 모드 (평속/파워)
+    <select id="mode">
+      <option value="speed" selected>평속</option>
+      <option value="power">파워</option>
+    </select>
+  </label>
+  <label id="speedLabel">평속 (km/h)
+    <input type="number" id="speed" value="25" min="3" max="80" step="0.5">
+  </label>
+  <label id="powerLabel" style="display:none;">파워 (W)
+    <input type="number" id="power" value="120" min="50" max="500" step="10">
+  </label>
+  <label id="weightLabel" style="display:none;">체중+자전거 (kg)
+    <input type="number" id="weight" value="68" min="40" max="150" step="1">
+  </label>
+  <label>휴식 (분/회)
+    <input type="number" id="restMin" value="5" min="0" max="120" step="1">
+  </label>
+  <label>휴식 간격 (km)
+    <input type="number" id="restEveryKm" value="20" min="5" max="200" step="5">
+  </label>
+  <div class="panel-break"></div>
+  <button id="run">분석</button>
+  <button id="useCurrentLoc" type="button" title="현재 GPS 위치에서 가장 가까운 GPX 지점부터 분석합니다">📍 현재위치 기준</button>
+  <button id="trackToggle" type="button" title="GPS 위치 변화에 따라 지도가 자동으로 따라갑니다">🛰 추적 시작</button>
+  <button id="compassToggle" type="button" title="폰 나침반(자기 센서) 방향으로 지도를 회전 — 정지 상태에서도 폰 돌리면 따라옴">🧭 나침반</button>
+  <button id="findBestTime" type="button" disabled>⏱ 최적 시각</button>
+  <button id="aiPrompt" type="button" disabled>🤖 AI 프롬프트</button>
+  <button id="elevToggle" type="button" title="하단 고도/속도 그래프를 숨기거나 표시합니다">📊 그래프 숨김</button>
+  <span id="bestResult"></span>
+  <span id="status">GPX 파일을 선택하세요.</span>
+</div>
+
+<div id="gauge">
+  <span class="tail-pct" id="tailPct">— TAILWIND</span>
+  <div class="bar"></div>
+  <span class="head-pct" id="headPct">HEADWIND —</span>
+</div>
+
+<div id="stats"></div>
+<div id="map"></div>
+<div id="elevResizer" title="드래그하여 그래프 크기 조절"></div>
+<div id="elevation"></div>
+
+<!-- AI 프롬프트 모달 -->
+<div id="aiModal" class="modal-overlay" style="display:none;">
+  <div class="modal" role="dialog" aria-modal="true">
+    <div class="modal-header">
+      <h3>🤖 AI 코스 분석 프롬프트</h3>
+      <button class="modal-close" id="aiClose" aria-label="닫기">×</button>
+    </div>
+    <div class="modal-body">
+      <p class="modal-hint">아래 텍스트를 복사해 ChatGPT / Claude / Gemini 등에 붙여넣으면 복장·보급·페이스 전략을 추천받을 수 있습니다.</p>
+      <textarea id="aiPromptText" rows="20" spellcheck="false"></textarea>
+    </div>
+    <div class="modal-footer">
+      <button class="modal-action" id="aiCopy" type="button">📋 클립보드에 복사</button>
+      <a class="modal-link" href="https://chat.openai.com/" target="_blank" rel="noopener">ChatGPT 열기 ↗</a>
+      <a class="modal-link" href="https://claude.ai/" target="_blank" rel="noopener">Claude 열기 ↗</a>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+"use strict";
+
+// ===== PWA manifest 동적 주입 (단일 HTML 유지) =====
+(function injectManifest() {
+  const iconSvg = "data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='32' fill='%232563eb'/%3E%3Cg stroke='%23ffffff' stroke-width='10' fill='none' stroke-linecap='round'%3E%3Cpath d='M28 70 Q70 56 110 70 T172 78'/%3E%3Cpath d='M28 100 Q70 86 110 100 T172 108'/%3E%3Cpath d='M28 130 Q70 116 110 130 T172 138'/%3E%3C/g%3E%3C/svg%3E";
+  const manifest = {
+    name: 'snoopy-windy · GPX 바람 분석',
+    short_name: 'snoopy-windy',
+    description: 'snoopy-windy — GPX 코스의 시간대별 바람·고도·속도·날씨를 분석합니다',
+    start_url: './',
+    scope: './',
+    display: 'standalone',
+    orientation: 'any',
+    background_color: '#ffffff',
+    theme_color: '#2563eb',
+    lang: 'ko',
+    categories: ['sports', 'navigation', 'utilities'],
+    icons: [
+      { src: iconSvg, sizes: '192x192 512x512', type: 'image/svg+xml', purpose: 'any maskable' }
+    ]
+  };
+  try {
+    const blob = new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.getElementById('pwa-manifest');
+    if (link) link.href = url;
+  } catch (e) { console.warn('manifest 주입 실패', e); }
+})();
+
+
+const map = L.map('map', {
+  zoomSnap: 0.25,          // 0.25 단위 스냅 (0.75는 0.25 × 3)
+  zoomDelta: 0.75,         // 휠/버튼/+- 키 한 번에 0.75씩 이동
+  wheelPxPerZoomLevel: 80  // 휠 감도
+}).setView([37.5665, 126.9780], 8);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+  attribution: '© OpenStreetMap, © CartoDB', subdomains: 'abcd', maxZoom: 19
+}).addTo(map);
+const routeLayer = L.featureGroup().addTo(map);
+const arrowLayer = L.layerGroup().addTo(map);
+const tempLayer  = L.layerGroup().addTo(map);
+const markerLayer = L.layerGroup().addTo(map);
+const hoverLayer = L.layerGroup().addTo(map);
+const currentLocLayer = L.layerGroup().addTo(map);
+
+// 폴리라인 이벤트 위임 (13K 개별 핸들러 → 그룹 1개) + same-segment 스킵
+let _lastPolyHoverSeg = null;
+routeLayer.on('mouseover', (e) => {
+  const s = e.layer && e.layer._segData;
+  if (!s || s === _lastPolyHoverSeg) return;
+  _lastPolyHoverSeg = s;
+  const ll = e.latlng ? [e.latlng.lat, e.latlng.lng] : null;
+  showWindAnimation(s, ll);
+});
+routeLayer.on('mouseout', () => {
+  _lastPolyHoverSeg = null;
+  scheduleHoverClear(100);
+});
+routeLayer.on('click', (e) => {
+  const s = e.layer && e.layer._segData;
+  if (!s) return;
+  const ll = e.latlng ? [e.latlng.lat, e.latlng.lng] : null;
+  showWindAnimation(s, ll);
+  scheduleHoverClear(2500);
+});
+
+// 거리 기반 segment 빠른 탐색 (binary search): O(log n)
+function findSegmentByDist(segments, targetM) {
+  if (!segments || !segments.length) return null;
+  if (segments[segments.length - 1].cumDistance <= targetM) return segments[segments.length - 1];
+  let lo = 0, hi = segments.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (segments[mid].cumDistance < targetM) lo = mid + 1;
+    else hi = mid;
+  }
+  return segments[lo];
+}
+
+// 기본 출발시각: 다음 정시
+(function setDefaultTime(){
+  const d = new Date(); d.setMinutes(0, 0, 0); d.setHours(d.getHours() + 1);
+  const pad = n => String(n).padStart(2, '0');
+  document.getElementById('startTime').value =
+    `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+})();
+
+const toRad = d => d * Math.PI / 180;
+const toDeg = r => r * 180 / Math.PI;
+
+function haversine(a, b) {
+  const R = 6371000;
+  const dLat = toRad(b.lat - a.lat), dLon = toRad(b.lon - a.lon);
+  const la1 = toRad(a.lat), la2 = toRad(b.lat);
+  const x = Math.sin(dLat/2)**2 + Math.cos(la1)*Math.cos(la2)*Math.sin(dLon/2)**2;
+  return 2 * R * Math.asin(Math.sqrt(x));
+}
+function bearing(a, b) {
+  const la1 = toRad(a.lat), la2 = toRad(b.lat);
+  const dLon = toRad(b.lon - a.lon);
+  const y = Math.sin(dLon) * Math.cos(la2);
+  const x = Math.cos(la1)*Math.sin(la2) - Math.sin(la1)*Math.cos(la2)*Math.cos(dLon);
+  return (toDeg(Math.atan2(y, x)) + 360) % 360;
+}
+
+// 자전거 파워 → 속도: 평지/언덕 + 풍 영향 단순 모델
+//   P = v × (Crr·m·g + ½·ρ·CdA·v_air·|v_air| + m·g·sin α)
+//   v_air = v + v_w_head  (정면풍이면 양수)
+function powerToSpeed(P_W, gradePct, vWindHeadKmh, massKg) {
+  const m = massKg || 78, g = 9.81, Crr = 0.005, CdA = 0.32, rho = 1.225;
+  const slope = Math.atan((gradePct || 0) / 100);
+  const vWh = (vWindHeadKmh || 0) / 3.6;
+  const powerAt = (vKmh) => {
+    const v = vKmh / 3.6;
+    const va = v + vWh;
+    const F = 0.5 * rho * CdA * va * Math.abs(va) + Crr * m * g + m * g * Math.sin(slope);
+    return F * v;
+  };
+  let lo = 1, hi = 90;
+  for (let i = 0; i < 60; i++) {
+    const mid = (lo + hi) / 2;
+    if (powerAt(mid) > P_W) hi = mid; else lo = mid;
+    if (hi - lo < 0.05) break;
+  }
+  return Math.max(2, (lo + hi) / 2);
+}
+
+// 풍 효과 점수: -1(완전 역풍) ~ +1(완전 순풍)
+function windScore(travelDir, windFromDir) {
+  const diff = ((windFromDir - travelDir + 540) % 360) - 180;
+  return -Math.cos(toRad(diff));
+}
+
+function lerpRgb(c1, c2, t) {
+  return [
+    Math.round(c1[0] + (c2[0]-c1[0])*t),
+    Math.round(c1[1] + (c2[1]-c1[1])*t),
+    Math.round(c1[2] + (c2[2]-c1[2])*t),
+  ];
+}
+// 5단계 분리 색상: 강한 순풍(진파랑) / 순풍(파랑) / 중립(슬레이트) / 역풍(빨강) / 강한 역풍(진빨강)
+//   회색조 지도 위에서도 또렷이 보이도록 중립/약풍 톤을 어두운 슬레이트로
+function scoreColor(score, windSpeed) {
+  const ws = windSpeed || 0;
+  if (ws < 1) return '#475569';                        // 거의 무풍 (진한 슬레이트)
+  if (score >=  0.5 && ws >= 8) return '#1d4ed8';      // 강한 순풍
+  if (score >=  0.15)            return '#3b82f6';     // 순풍 (풍속 무관)
+  if (score <= -0.5 && ws >= 8) return '#b91c1c';      // 강한 역풍
+  if (score <= -0.15)            return '#ef4444';     // 역풍 (풍속 무관)
+  return '#64748b';                                    // 측풍/중립 (슬레이트)
+}
+
+// GPX에 고도가 없는 점만 Open-Meteo elevation API로 보강 (필요한 점만 호출)
+async function fillElevationIfMissing(pts, statusEl) {
+  const missing = [];
+  for (let i = 0; i < pts.length; i++) {
+    if (typeof pts[i].ele !== 'number') missing.push(i);
+  }
+  if (missing.length === 0) return 0;
+  const BATCH = 100;
+  let filled = 0;
+  for (let off = 0; off < missing.length; off += BATCH) {
+    const idxBatch = missing.slice(off, off + BATCH);
+    statusEl.textContent = `고도 보강 ${off + idxBatch.length}/${missing.length}…`;
+    const lats = idxBatch.map(i => pts[i].lat).join(',');
+    const lons = idxBatch.map(i => pts[i].lon).join(',');
+    const url = `https://api.open-meteo.com/v1/elevation?latitude=${lats}&longitude=${lons}`;
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      if (Array.isArray(data.elevation)) {
+        for (let j = 0; j < idxBatch.length && j < data.elevation.length; j++) {
+          if (typeof data.elevation[j] === 'number') {
+            pts[idxBatch[j]].ele = data.elevation[j];
+            filled++;
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Open-Meteo elevation 실패', e);
+    }
+  }
+  return filled;
+}
+
+// 현재위치 기준 trim에 쓰일 임시 변수 (한 번 분석 후 자동 해제)
+let pendingStartLatLon = null;
+let skipNextFitBounds = false;
+let currentLocMarker = null;
+let currentWindMarker = null;
+let trackWatchId = null;
+let trackFirstFix = true;
+
+// 추적 모드 풍 캐시 (분석 없이도 동작)
+let trackWind = null;          // { windDir, windSpeed }
+let trackWindFetchedAt = 0;
+let trackWindFetchedAt_LL = null;
+let trackHeadingPrev = null;
+let trackHeadingSmooth = null;
+
+async function fetchCurrentWindForTracking(lat, lon) {
+  const now = Date.now();
+  // 5분 캐시 + 1km 반경 안이면 재사용
+  if (trackWind && (now - trackWindFetchedAt < 5*60*1000) && trackWindFetchedAt_LL) {
+    if (haversine(trackWindFetchedAt_LL, { lat, lon }) < 1000) return trackWind;
+  }
+  try {
+    const url = `https://api.open-meteo.com/v1/forecast`
+      + `?latitude=${lat}&longitude=${lon}`
+      + `&current=wind_speed_10m,wind_direction_10m`
+      + `&wind_speed_unit=kmh&models=ecmwf_ifs025`;
+    const res = await fetch(url);
+    if (!res.ok) return trackWind;
+    const data = await res.json();
+    if (data.current) {
+      trackWind = {
+        windDir:   data.current.wind_direction_10m,
+        windSpeed: data.current.wind_speed_10m
+      };
+      trackWindFetchedAt = now;
+      trackWindFetchedAt_LL = { lat, lon };
+    }
+  } catch (e) { /* keep prev */ }
+  return trackWind;
+}
+
+function computeTrackHeading(lat, lon, gpsHeading) {
+  if (typeof gpsHeading === 'number' && !isNaN(gpsHeading) && gpsHeading >= 0) {
+    trackHeadingPrev = { lat, lon };
+    return gpsHeading;
+  }
+  if (trackHeadingPrev) {
+    const d = haversine(trackHeadingPrev, { lat, lon });
+    if (d > 3) {
+      const h = bearing(trackHeadingPrev, { lat, lon });
+      trackHeadingPrev = { lat, lon };
+      return h;
+    }
+    return null;
+  }
+  trackHeadingPrev = { lat, lon };
+  return null;
+}
+
+function applyMapRotation(heading) {
+  if (heading == null || isNaN(heading)) return;
+  // 각도 EMA smoothing (wrap 처리)
+  if (trackHeadingSmooth == null) trackHeadingSmooth = heading;
+  else {
+    const diff = ((heading - trackHeadingSmooth + 540) % 360) - 180;
+    trackHeadingSmooth = (trackHeadingSmooth + 0.4 * diff + 360) % 360;
+  }
+  const c = document.querySelector('#map .leaflet-container');
+  if (c) c.style.transform = `rotate(${-trackHeadingSmooth}deg)`;
+}
+
+function clearMapRotation() {
+  trackHeadingSmooth = null;
+  trackHeadingPrev = null;
+  const c = document.querySelector('#map .leaflet-container');
+  if (c) c.style.transform = '';
+}
+
+// 🧭 나침반 모드 (폰 자기 센서로 회전)
+let compassMode = false;
+let compassHandler = null;
+let compassLastApplied = 0;
+
+function onCompassOrient(e) {
+  let heading;
+  if (typeof e.webkitCompassHeading === 'number') {
+    heading = e.webkitCompassHeading;            // iOS Safari (절대 나침반)
+  } else if (e.absolute && typeof e.alpha === 'number') {
+    heading = (360 - e.alpha) % 360;             // Android 절대 방향
+  } else if (typeof e.alpha === 'number') {
+    heading = (360 - e.alpha) % 360;             // 상대 방향 fallback (정확도 떨어짐)
+  } else {
+    return;
+  }
+  // 100ms throttle
+  const now = performance.now();
+  if (now - compassLastApplied < 100) return;
+  compassLastApplied = now;
+  applyMapRotation(heading);
+}
+
+async function startCompass() {
+  // iOS Safari: 사용자 제스처 기반 권한 요청
+  if (typeof DeviceOrientationEvent !== 'undefined' &&
+      typeof DeviceOrientationEvent.requestPermission === 'function') {
+    try {
+      const perm = await DeviceOrientationEvent.requestPermission();
+      if (perm !== 'granted') {
+        document.getElementById('status').textContent = '나침반 권한이 거부되었습니다.';
+        return false;
+      }
+    } catch (err) {
+      document.getElementById('status').textContent = '나침반 권한 요청 실패: ' + err.message;
+      return false;
+    }
+  }
+  compassHandler = onCompassOrient;
+  // 절대 방향 이벤트 우선 (Android Chrome)
+  if ('ondeviceorientationabsolute' in window) {
+    window.addEventListener('deviceorientationabsolute', compassHandler);
+  }
+  // iOS는 deviceorientation 이벤트의 webkitCompassHeading 사용
+  window.addEventListener('deviceorientation', compassHandler);
+  compassMode = true;
+  return true;
+}
+
+function stopCompass() {
+  if (compassHandler) {
+    window.removeEventListener('deviceorientationabsolute', compassHandler);
+    window.removeEventListener('deviceorientation', compassHandler);
+    compassHandler = null;
+  }
+  compassMode = false;
+  // 추적 중이 아니면 회전 리셋
+  if (trackWatchId == null) clearMapRotation();
+}
+
+// 🌬 snoopy-windy 로고 = 입력 폼 접기/펼치기 토글
+(function setupBrandToggle() {
+  const btn = document.getElementById('brandToggle');
+  const panel = document.getElementById('panel');
+  btn.addEventListener('click', () => {
+    const collapsed = panel.classList.toggle('collapsed');
+    btn.setAttribute('aria-label', collapsed ? '입력 폼 펼치기' : '입력 폼 접기');
+    setTimeout(() => map.invalidateSize(), 200);
+  });
+})();
+
+// 모바일에서 분석/추적 시작 시 자동으로 입력 폼 접기
+function autoCollapseOnMobile() {
+  if (window.matchMedia && window.matchMedia('(max-width: 768px)').matches) {
+    const panel = document.getElementById('panel');
+    if (!panel.classList.contains('collapsed')) {
+      panel.classList.add('collapsed');
+      setTimeout(() => map.invalidateSize(), 200);
+    }
+  }
+}
+
+// 📊 하단 그래프 표시/숨김 토글
+(function setupElevToggle() {
+  const btn     = document.getElementById('elevToggle');
+  const elev    = document.getElementById('elevation');
+  const resizer = document.getElementById('elevResizer');
+  btn.addEventListener('click', () => {
+    const hidden = elev.classList.toggle('hidden');
+    resizer.classList.toggle('hidden', hidden);
+    btn.textContent = hidden ? '📊 그래프 보이기' : '📊 그래프 숨김';
+    // 지도 영역이 늘어남 → leaflet 사이즈 갱신
+    setTimeout(() => map.invalidateSize(), 50);
+    // 다시 보이는 경우 그래프 재렌더 (canvas는 컨테이너 크기 변경 후 다시 그려야 함)
+    if (!hidden && lastSegments) {
+      setTimeout(() => renderElevation(lastSegments, lastAvgKmh), 100);
+    }
+  });
+})();
+
+(function setupCompassToggle() {
+  const btn = document.getElementById('compassToggle');
+  btn.addEventListener('click', async () => {
+    if (compassMode) {
+      stopCompass();
+      btn.classList.remove('active');
+      btn.textContent = '🧭 나침반';
+    } else {
+      btn.disabled = true;
+      btn.textContent = '🧭 권한 요청 중…';
+      const ok = await startCompass();
+      btn.disabled = false;
+      if (ok) {
+        btn.classList.add('active');
+        btn.textContent = '🧭 나침반 ON';
+      } else {
+        btn.textContent = '🧭 나침반';
+      }
+    }
+  });
+})();
+
+// 현재 위치 마커 색상을 이동방향 vs 풍향에 따라 갱신 (순풍=파랑, 역풍=빨강, 중립=회색)
+function updateLocMarkerWindColor(lat, lon, heading) {
+  if (!currentLocMarker) return;
+  const el = currentLocMarker.getElement();
+  if (!el) return;
+  const dot = el.querySelector('.current-loc-marker');
+  if (!dot) return;
+
+  let windDir = null;
+  if (analysis) {
+    const s = findNearestSegment(analysis.segments, lat, lon);
+    if (s && typeof s.windDir === 'number') windDir = s.windDir;
+  }
+  if (windDir == null && trackWind && typeof trackWind.windDir === 'number') {
+    windDir = trackWind.windDir;
+  }
+  if (windDir == null || typeof heading !== 'number') {
+    // 데이터 없음 → 기본 파란색
+    dot.style.setProperty('--loc-color', '#3b82f6');
+    dot.style.setProperty('--loc-pulse', 'rgba(59,130,246,0.45)');
+    return;
+  }
+  const score = windScore(heading, windDir);
+  let color, pulse;
+  if (score >= 0.15) {
+    color = '#3b82f6'; pulse = 'rgba(59,130,246,0.5)';   // 순풍
+  } else if (score <= -0.15) {
+    color = '#ef4444'; pulse = 'rgba(239,68,68,0.5)';     // 역풍
+  } else {
+    color = '#64748b'; pulse = 'rgba(100,116,139,0.45)';  // 측풍/중립
+  }
+  dot.style.setProperty('--loc-color', color);
+  dot.style.setProperty('--loc-pulse', pulse);
+}
+
+// 추적 모드 마커 툴팁 (마커 아래쪽, 애니메이션 안 가림)
+function updateTrackTooltip(lat, lon, heading) {
+  if (!currentLocMarker) return;
+  const lines = [];
+  if (typeof heading === 'number') {
+    lines.push(`<span class="lbl">진행</span>${heading.toFixed(0)}°`);
+  }
+  let windDir = null, windSpeed = null;
+  if (analysis) {
+    const s = findNearestSegment(analysis.segments, lat, lon);
+    if (s && typeof s.windDir === 'number') { windDir = s.windDir; windSpeed = s.windSpeed; }
+  }
+  if (windDir == null && trackWind && typeof trackWind.windDir === 'number') {
+    windDir = trackWind.windDir; windSpeed = trackWind.windSpeed;
+  }
+  if (typeof windDir === 'number') {
+    lines.push(`<span class="lbl">풍향</span>${windDir.toFixed(0)}° (불어오는)`);
+    lines.push(`<span class="lbl">풍속</span>${((windSpeed||0)/3.6).toFixed(1)} m/s`);
+    if (typeof heading === 'number') {
+      const score = windScore(heading, windDir);
+      const cls = score > 0.05 ? 'tail' : score < -0.05 ? 'head' : '';
+      const tag = score > 0.05 ? '순풍' : score < -0.05 ? '역풍' : '측풍';
+      lines.push(`<span class="lbl">풍 효과</span><span class="${cls}">${(score*100).toFixed(0)}% ${tag}</span>`);
+    }
+  }
+  if (analysis) {
+    const s = findNearestSegment(analysis.segments, lat, lon);
+    if (s) {
+      if (typeof s.temperature === 'number') {
+        lines.push(`<span class="lbl">기온</span>${s.temperature.toFixed(1)}°C`);
+      }
+      const eta = new Date(s.etaMs);
+      const pad = n => String(n).padStart(2,'0');
+      lines.push(`<span class="lbl">ETA</span>${pad(eta.getHours())}:${pad(eta.getMinutes())}`);
+      lines.push(`<span class="lbl">누적</span>${(s.cumDistance/1000).toFixed(1)} km`);
+    }
+  }
+  const html = lines.join('<br>');
+  // 영구 tooltip이 없으면 새로 bind
+  if (!currentLocMarker._trackTooltipBound) {
+    currentLocMarker.unbindTooltip();
+    currentLocMarker.bindTooltip(html, {
+      permanent: true,
+      direction: 'bottom',
+      offset: [0, 60],
+      className: 'track-tooltip'
+    });
+    currentLocMarker._trackTooltipBound = true;
+  } else {
+    currentLocMarker.setTooltipContent(html);
+  }
+}
+
+function clearTrackTooltip() {
+  if (currentLocMarker && currentLocMarker._trackTooltipBound) {
+    currentLocMarker.unbindTooltip();
+    currentLocMarker._trackTooltipBound = false;
+    // 기본 호버 툴팁 복원
+    currentLocMarker.bindTooltip('현재 위치', { direction: 'top', offset: [0, -8] });
+  }
+}
+
+// 가장 가까운 segment 찾기 (lat/lon 기반)
+function findNearestSegment(segments, lat, lon) {
+  if (!segments || !segments.length) return null;
+  let bestI = 0, bestD = Infinity;
+  const target = { lat, lon };
+  for (let i = 0; i < segments.length; i++) {
+    const d = haversine(segments[i].mid, target);
+    if (d < bestD) { bestD = d; bestI = i; }
+  }
+  return segments[bestI];
+}
+
+// 현재 위치 마커 + 풍 흐름 애니메이션 갱신 (재사용 패턴)
+function updateCurrentLocationMarker(lat, lon) {
+  // 1) 펄스 위치 점
+  if (currentLocMarker) {
+    currentLocMarker.setLatLng([lat, lon]);
+  } else {
+    currentLocMarker = L.marker([lat, lon], {
+      icon: L.divIcon({
+        html: '<div class="current-loc-marker"></div>',
+        className: '', iconSize: [18, 18], iconAnchor: [9, 9]
+      }),
+      interactive: false, keyboard: false, zIndexOffset: 1000
+    }).bindTooltip('현재 위치', { direction: 'top', offset: [0, -8] }).addTo(currentLocLayer);
+  }
+
+  // 2) 풍 데이터 결정: 분석된 segment > 추적용 fetch 캐시
+  let windDir = null;
+  if (analysis) {
+    const s = findNearestSegment(analysis.segments, lat, lon);
+    if (s && typeof s.windDir === 'number') windDir = s.windDir;
+  }
+  if (windDir == null && trackWind && typeof trackWind.windDir === 'number') {
+    windDir = trackWind.windDir;
+  }
+  if (windDir != null) {
+    const blowsTo = (windDir + 180) % 360;
+    const cssRot = (blowsTo - 90 + 360) % 360;
+    if (currentWindMarker) {
+      currentWindMarker.setLatLng([lat, lon]);
+      const el = currentWindMarker.getElement();
+      if (el) {
+        const inner = el.querySelector('.wind-anim');
+        if (inner) inner.style.setProperty('--wind-rot', cssRot + 'deg');
+      }
+    } else {
+      const html = `<div class="wind-anim" style="--wind-rot:${cssRot}deg;">
+          <div class="wind-particle"></div><div class="wind-particle"></div>
+        </div>`;
+      const sz = (window.matchMedia && window.matchMedia('(max-width: 768px)').matches) ? 80 : 100;
+      currentWindMarker = L.marker([lat, lon], {
+        icon: L.divIcon({ html, className: '', iconSize:[sz,sz], iconAnchor:[sz/2,sz/2] }),
+        interactive: false, keyboard: false, zIndexOffset: 999
+      }).addTo(currentLocLayer);
+    }
+  } else if (currentWindMarker) {
+    // 풍 데이터 없으면 마커 제거
+    currentLocLayer.removeLayer(currentWindMarker);
+    currentWindMarker = null;
+  }
+}
+
+// 두 lat/lon 배열에서 가장 가까운 점의 인덱스와 거리(m) 반환
+function findNearestPointIndex(pts, lat, lon) {
+  let bestI = 0, bestD = Infinity;
+  const target = { lat, lon };
+  for (let i = 0; i < pts.length; i++) {
+    const d = haversine(pts[i], target);
+    if (d < bestD) { bestD = d; bestI = i; }
+  }
+  return { index: bestI, distance: bestD };
+}
+
+// GPX 점 배열을 방향 옵션에 따라 변환
+//   forward: 그대로 / reverse: 뒤집기 / round: 정방향 + 역방향 이어붙임 (왕복)
+function applyDirection(pts, direction) {
+  if (!Array.isArray(pts) || pts.length === 0) return pts;
+  if (direction === 'reverse') return pts.slice().reverse();
+  if (direction === 'round') {
+    const rev = pts.slice().reverse();
+    // 첫 점(=원래 마지막 점) 중복 제거
+    return pts.concat(rev.slice(1));
+  }
+  return pts;
+}
+
+function parseGPX(text) {
+  const xml = new DOMParser().parseFromString(text, 'text/xml');
+  if (xml.getElementsByTagName('parsererror').length) {
+    throw new Error('GPX 파싱 실패: 형식이 올바르지 않습니다.');
+  }
+  const pickEle = (p) => {
+    const e = p.getElementsByTagName('ele')[0];
+    return e ? parseFloat(e.textContent) : null;
+  };
+  let pts = [...xml.getElementsByTagName('trkpt')].map(p => ({
+    lat: parseFloat(p.getAttribute('lat')),
+    lon: parseFloat(p.getAttribute('lon')),
+    ele: pickEle(p),
+  }));
+  if (pts.length === 0) {
+    pts = [...xml.getElementsByTagName('rtept')].map(p => ({
+      lat: parseFloat(p.getAttribute('lat')),
+      lon: parseFloat(p.getAttribute('lon')),
+      ele: pickEle(p),
+    }));
+  }
+  if (pts.length === 0) throw new Error('GPX에 trkpt/rtept가 없습니다.');
+  return pts;
+}
+
+// 인접 trkpt를 ~30m 단위로 결합해서 segment 수를 줄임 (성능 최우선)
+//   라이딩 분석에는 30m 정밀도면 충분 — 13K → ~2~3K 수준
+const SEGMENT_MIN_M = 30;
+function buildSegments(pts, startMs, speedKmh) {
+  const speedMs = speedKmh * 1000 / 3600;
+  const segs = [];
+  let cum = 0;
+  let groupStart = pts[0];
+  let groupCum = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const d = haversine(pts[i-1], pts[i]);
+    if (d < 0.5) continue;
+    cum += d;
+    groupCum += d;
+    // 누적 거리가 임계 이상이거나 마지막 점이면 segment 생성
+    if (groupCum >= SEGMENT_MIN_M || i === pts.length - 1) {
+      const a = groupStart, b = pts[i];
+      const t1 = startMs + ((cum - groupCum) / speedMs) * 1000;
+      const t2 = startMs + (cum / speedMs) * 1000;
+      segs.push({
+        a, b,
+        mid: { lat: (a.lat + b.lat) / 2, lon: (a.lon + b.lon) / 2 },
+        bearing: bearing(a, b),
+        distance: groupCum, cumDistance: cum,
+        etaMs: (t1 + t2) / 2,
+        grade: null
+      });
+      groupStart = b;
+      groupCum = 0;
+    }
+  }
+  smoothGrades(segs, 100); // ±50m 윈도우 평균 (고도 노이즈 완화)
+  return segs;
+}
+
+// 자전거 컴퓨터 표준 방식: ±half 범위의 (Σ Δele / Σ Δdist) × 100
+function smoothGrades(segments, windowM) {
+  const half = windowM / 2;
+  for (let i = 0; i < segments.length; i++) {
+    let dEle = 0, dDist = 0;
+    let j = i;
+    while (j >= 0 && segments[i].cumDistance - segments[j].cumDistance <= half) {
+      const sj = segments[j];
+      if (typeof sj.a.ele === 'number' && typeof sj.b.ele === 'number') {
+        dEle += sj.b.ele - sj.a.ele;
+        dDist += sj.distance;
+      }
+      j--;
+    }
+    j = i + 1;
+    while (j < segments.length && segments[j].cumDistance - segments[i].cumDistance <= half) {
+      const sj = segments[j];
+      if (typeof sj.a.ele === 'number' && typeof sj.b.ele === 'number') {
+        dEle += sj.b.ele - sj.a.ele;
+        dDist += sj.distance;
+      }
+      j++;
+    }
+    segments[i].grade = dDist > 0 ? (dEle / dDist) * 100 : null;
+  }
+}
+
+async function fetchWindGrid(segments, statusEl, model) {
+  const cache = new Map();
+  const groups = new Map();
+  for (const s of segments) {
+    const lat = Math.round(s.mid.lat * 4) / 4;
+    const lon = Math.round(s.mid.lon * 4) / 4;
+    const k = `${lat.toFixed(2)},${lon.toFixed(2)}`;
+    if (!groups.has(k)) groups.set(k, { lat, lon });
+  }
+  let i = 0; const total = groups.size;
+  for (const [k, g] of groups) {
+    i++;
+    statusEl.textContent = `풍 데이터 조회 중 ${i}/${total}…`;
+    const url = `https://api.open-meteo.com/v1/forecast`
+      + `?latitude=${g.lat}&longitude=${g.lon}`
+      + `&hourly=wind_speed_10m,wind_direction_10m,temperature_2m,weather_code,precipitation,relative_humidity_2m`
+      + `&wind_speed_unit=kmh&timezone=UTC&forecast_days=16&past_days=2`
+      + (model ? `&models=${encodeURIComponent(model)}` : '');
+    try {
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const data = await res.json();
+      // hourly.time을 epoch ms 배열로 한 번만 파싱해서 mapping에서 재사용
+      if (data.hourly && Array.isArray(data.hourly.time)) {
+        data._hourlyTimeMs = data.hourly.time.map(t => Date.parse(t + 'Z'));
+      }
+      cache.set(k, data);
+    } catch (e) {
+      console.error('Open-Meteo 호출 실패', k, e);
+    }
+  }
+  return cache;
+}
+
+// 캐시된 hourly 데이터를 segment의 etaMs에 맞춰 매핑 — O(1) 인덱스 계산
+//   hourly는 1시간 간격이므로 (etaMs - t0) / 3600000 으로 직접 인덱스 산출
+function mapWindToSegments(segments, cache) {
+  const reset = (s) => {
+    s.windDir = null; s.windSpeed = null; s.score = null;
+    s.temperature = null; s.weatherCode = null; s.precip = null; s.humidity = null;
+  };
+  const HOUR_MS = 3600000;
+  const TOL_MS  = 90 * 60 * 1000;
+  for (const s of segments) {
+    const lat = Math.round(s.mid.lat * 4) / 4;
+    const lon = Math.round(s.mid.lon * 4) / 4;
+    const data = cache.get(`${lat.toFixed(2)},${lon.toFixed(2)}`);
+    if (!data || !data.hourly || !data._hourlyTimeMs || data._hourlyTimeMs.length === 0) {
+      reset(s); continue;
+    }
+    const tArr = data._hourlyTimeMs;
+    let idx = Math.round((s.etaMs - tArr[0]) / HOUR_MS);
+    if (idx < 0 || idx >= tArr.length) { reset(s); continue; }
+    if (Math.abs(tArr[idx] - s.etaMs) > TOL_MS) { reset(s); continue; }
+    s.windDir   = data.hourly.wind_direction_10m[idx];
+    s.windSpeed = data.hourly.wind_speed_10m[idx];
+    s.temperature = data.hourly.temperature_2m ? data.hourly.temperature_2m[idx] : null;
+    s.weatherCode = data.hourly.weather_code ? data.hourly.weather_code[idx] : null;
+    s.precip      = data.hourly.precipitation ? data.hourly.precipitation[idx] : null;
+    s.humidity    = data.hourly.relative_humidity_2m ? data.hourly.relative_humidity_2m[idx] : null;
+  }
+}
+
+// WMO weather code → 이모지 / 한글
+function weatherEmoji(code) {
+  if (code == null) return '';
+  if (code === 0) return '☀️';
+  if (code <= 2)  return '🌤️';
+  if (code === 3) return '☁️';
+  if (code === 45 || code === 48) return '🌫️';
+  if (code <= 57) return '🌦️';
+  if (code <= 67) return '🌧️';
+  if (code <= 77) return '🌨️';
+  if (code <= 82) return '🌧️';
+  if (code <= 86) return '🌨️';
+  if (code >= 95) return '⛈️';
+  return '';
+}
+function weatherText(code) {
+  if (code == null) return '—';
+  if (code === 0) return '맑음';
+  if (code <= 2)  return '대체로 맑음';
+  if (code === 3) return '흐림';
+  if (code === 45 || code === 48) return '안개';
+  if (code <= 57) return '이슬비';
+  if (code <= 67) return '비';
+  if (code <= 77) return '눈';
+  if (code <= 82) return '소나기';
+  if (code <= 86) return '눈 소나기';
+  if (code >= 95) return '뇌우';
+  return '';
+}
+function isoHourUTC(ms) {
+  const d = new Date(ms); d.setUTCMinutes(0, 0, 0);
+  return d.toISOString().slice(0, 16);
+}
+function nearestIndex(timeArr, targetMs) {
+  let best = -1, bestDiff = Infinity;
+  for (let i = 0; i < timeArr.length; i++) {
+    const t = Date.parse(timeArr[i] + 'Z');
+    const d = Math.abs(t - targetMs);
+    if (d < bestDiff) { bestDiff = d; best = i; }
+  }
+  return best;
+}
+
+// 각 segment에 score / effectiveSpeed / etaMs / cumTimeSec 채워넣기 (휴식 포함)
+function applyKinematics(segments, mode, baseSpeed, powerW, massKg, startMs, restMin, restEveryKm) {
+  let cumSec = 0;
+  const totalKm = segments.length ? segments[segments.length-1].cumDistance / 1000 : 0;
+  let nextRestKm = (restMin > 0 && restEveryKm > 0) ? restEveryKm : Infinity;
+  let restCount = 0;
+  for (const s of segments) {
+    if (typeof s.windDir === 'number') {
+      s.score = windScore(s.bearing, s.windDir);
+    }
+    const score = (typeof s.score === 'number') ? s.score : 0;
+    const ws = s.windSpeed || 0;
+    let v;
+    if (mode === 'power') {
+      v = powerToSpeed(powerW, s.grade ?? 0, -ws * score, massKg);
+    } else {
+      v = Math.max(5, baseSpeed + score * ws * 0.4);
+    }
+    s.effectiveSpeed = v;
+    const segSec = s.distance / (v / 3.6);
+    s.etaMs = startMs + (cumSec + segSec / 2) * 1000;
+    cumSec += segSec;
+    s.cumTimeSec = cumSec;
+
+    // 휴식: 누적거리가 다음 휴식 지점을 넘었고, 도착 직전이 아니면 휴식시간 추가
+    while (s.cumDistance / 1000 >= nextRestKm && nextRestKm < totalKm - 0.1) {
+      cumSec += restMin * 60;
+      restCount++;
+      nextRestKm += restEveryKm;
+    }
+  }
+  return { restCount, restSec: restCount * (restMin || 0) * 60 };
+}
+
+// 지도 위 풍 흐름 애니메이션 (그래프 호버 / 폴리라인 호버 공용)
+//   마커를 재사용하여 깜빡임 방지: 위치는 setLatLng, 회전은 CSS var 갱신
+let hoverYellowMarker = null;
+let hoverWindMarker = null;
+let hoverClearTimer = null;
+
+function cancelHoverClear() {
+  if (hoverClearTimer) { clearTimeout(hoverClearTimer); hoverClearTimer = null; }
+}
+function clearHoverMarkers() {
+  cancelHoverClear();
+  if (hoverYellowMarker) { hoverLayer.removeLayer(hoverYellowMarker); hoverYellowMarker = null; }
+  if (hoverWindMarker)   { hoverLayer.removeLayer(hoverWindMarker); hoverWindMarker = null; }
+}
+function scheduleHoverClear(delay) {
+  cancelHoverClear();
+  hoverClearTimer = setTimeout(clearHoverMarkers, delay || 80);
+}
+
+function showWindAnimation(s, latlon) {
+  cancelHoverClear();
+  const ll = latlon || [s.b.lat, s.b.lon];
+
+  // 노란 점
+  if (hoverYellowMarker) {
+    hoverYellowMarker.setLatLng(ll);
+  } else {
+    hoverYellowMarker = L.circleMarker(ll, {
+      radius: 8, color: '#000', weight: 2, fillColor: '#ffeb3b', fillOpacity: 1,
+      interactive: false
+    }).addTo(hoverLayer);
+  }
+
+  // 풍 흐름 애니메이션 (경량: 100×100 div + 입자 2개)
+  if (typeof s.windDir === 'number') {
+    const blowsTo = (s.windDir + 180) % 360;
+    const cssRot = (blowsTo - 90 + 360) % 360;
+    if (hoverWindMarker) {
+      hoverWindMarker.setLatLng(ll);
+      const el = hoverWindMarker.getElement();
+      if (el) {
+        const inner = el.querySelector('.wind-anim');
+        if (inner) inner.style.setProperty('--wind-rot', cssRot + 'deg');
+      }
+    } else {
+      const html = `<div class="wind-anim" style="--wind-rot:${cssRot}deg;">
+          <div class="wind-particle"></div><div class="wind-particle"></div>
+        </div>`;
+      const sz = (window.matchMedia && window.matchMedia('(max-width: 768px)').matches) ? 80 : 100;
+      hoverWindMarker = L.marker(ll, {
+        icon: L.divIcon({ html, className: '', iconSize:[sz,sz], iconAnchor:[sz/2,sz/2] }),
+        interactive: false, keyboard: false
+      }).addTo(hoverLayer);
+    }
+  } else if (hoverWindMarker) {
+    hoverLayer.removeLayer(hoverWindMarker);
+    hoverWindMarker = null;
+  }
+}
+
+function drawSegments(segments) {
+  routeLayer.clearLayers();
+  arrowLayer.clearLayers();
+  tempLayer.clearLayers();
+  markerLayer.clearLayers();
+
+  const bounds = [];
+  for (const s of segments) {
+    let color = '#475569', weight = 5;
+    if (typeof s.windDir === 'number') {
+      color = scoreColor(s.score, s.windSpeed);
+      const speedFactor = Math.min(1, (s.windSpeed || 0) / 25);
+      weight = 5 + Math.round(speedFactor * 4);
+    }
+    const poly = L.polyline(
+      [[s.a.lat, s.a.lon], [s.b.lat, s.b.lon]],
+      { color, weight, opacity: 0.95, lineCap: 'round' }
+    );
+    poly._segData = s;  // featureGroup 위임 핸들러에서 segment 식별용
+    poly.bindTooltip(
+      `진행: ${s.bearing.toFixed(0)}°<br>`
+      + (typeof s.windDir === 'number'
+          ? `풍향: ${s.windDir.toFixed(0)}° (불어오는)<br>`
+            + `풍속: ${(s.windSpeed/3.6).toFixed(1)} m/s<br>`
+            + `풍 효과: ${(s.score*100).toFixed(0)}% ${s.score>0.05?'순풍':s.score<-0.05?'역풍':'중립'}<br>`
+            + (s.temperature != null ? `기온: ${s.temperature.toFixed(1)}°C<br>` : '')
+          : '풍 데이터 없음<br>')
+      + `ETA: ${new Date(s.etaMs).toLocaleString('ko-KR')}<br>`
+      + `누적: ${(s.cumDistance/1000).toFixed(1)} km`,
+      { sticky: true, direction: 'bottom', offset: [0, 60] }
+    ).addTo(routeLayer);
+    bounds.push([s.a.lat, s.a.lon]);
+  }
+
+  // 진행 방향 화살표 (5km 간격)
+  let nextArrow = 2500;
+  for (const s of segments) {
+    if (s.cumDistance >= nextArrow) {
+      addDirectionArrow(s.mid, s.bearing);
+      nextArrow += 5000;
+    }
+  }
+  // 날씨 + 온도 + 강수 라벨 (15km 간격)
+  let nextTemp = 7500;
+  for (const s of segments) {
+    if (s.cumDistance >= nextTemp && s.temperature != null) {
+      addWeatherLabel(s.mid, s.temperature, s.weatherCode, s.precip);
+      nextTemp += 15000;
+    }
+  }
+  // 시작/끝 마커
+  if (segments.length) {
+    const first = segments[0].a;
+    const last  = segments[segments.length-1].b;
+    L.marker([first.lat, first.lon], {
+      icon: L.divIcon({ html: '<div class="start-dot"></div>', className: '', iconSize:[18,18], iconAnchor:[9,9] })
+    }).bindTooltip('출발', {direction:'top'}).addTo(markerLayer);
+    L.marker([last.lat, last.lon], {
+      icon: L.divIcon({ html: '<div class="end-flag">🏁</div>', className: '', iconSize:[22,22], iconAnchor:[11,11] })
+    }).bindTooltip('도착', {direction:'top'}).addTo(markerLayer);
+    bounds.push([last.lat, last.lon]);
+  }
+  if (skipNextFitBounds) {
+    skipNextFitBounds = false;
+  } else if (bounds.length) {
+    map.fitBounds(bounds, { padding: [40, 40] });
+  }
+}
+
+function addDirectionArrow(latlon, travelBearing) {
+  // ▶는 기본 동쪽(0°)을 가리킴 → 지리 방위각에서 -90° 보정
+  const rot = (travelBearing - 90 + 360) % 360;
+  const html = `<div class="arrow-icon" style="transform: rotate(${rot}deg);">▶</div>`;
+  L.marker([latlon.lat, latlon.lon], {
+    icon: L.divIcon({ html, className: '', iconSize:[18,18], iconAnchor:[9,9] }),
+    interactive: false
+  }).addTo(arrowLayer);
+}
+function addWeatherLabel(latlon, tempC, weatherCode, precip) {
+  const emoji = weatherEmoji(weatherCode);
+  const rain = (precip != null && precip >= 0.1) ? ` 💧${precip.toFixed(1)}` : '';
+  const html = `<div class="temp-label">${emoji} ${tempC.toFixed(1)}°C${rain}</div>`;
+  L.marker([latlon.lat, latlon.lon], {
+    icon: L.divIcon({ html, className: '', iconSize:[80,18], iconAnchor:[40,-6] }),
+    interactive: false
+  }).addTo(tempLayer);
+}
+
+// 시간 가중 비율: 가중치 = (구간 소요시간) × |score| × min(1, apSpeed/20)
+//   평속이 일정할 때 거리 가중과 동일 형태지만, 시간(분) 단위로도 표시
+function renderGauge(segments, totalH) {
+  let tail = 0, head = 0;
+  for (const s of segments) {
+    if (typeof s.score !== 'number') continue;
+    const w = s.distance * Math.min(1, (s.windSpeed || 0) / 20);
+    if (s.score > 0) tail += w * s.score;
+    else if (s.score < 0) head += w * (-s.score);
+  }
+  const sum = tail + head;
+  const tailPct = sum ? (tail / sum * 100) : 0;
+  const headPct = 100 - tailPct;
+  const tailMin = totalH * 60 * tailPct / 100;
+  const headMin = totalH * 60 * headPct / 100;
+  document.getElementById('tailPct').textContent =
+    `${tailPct.toFixed(1)}% TAILWIND (${formatMin(tailMin)})`;
+  document.getElementById('headPct').textContent =
+    `HEADWIND ${headPct.toFixed(1)}% (${formatMin(headMin)})`;
+}
+function formatMin(min) {
+  const h = Math.floor(min / 60);
+  const m = Math.round(min % 60);
+  return h ? `${h}h ${m}m` : `${m}m`;
+}
+
+function renderStats(segments, startMs, totalH, avgKmh, kin) {
+  const totalM = segments.reduce((a, s) => a + s.distance, 0);
+  const arriveMs = startMs + totalH * 3600 * 1000;
+  const restMin = kin && kin.restSec ? Math.round(kin.restSec / 60) : 0;
+  const ridingMin = Math.round(totalH * 60 - restMin);
+
+  let tailDist = 0, headDist = 0, neutralDist = 0;
+  let avgWindAcc = 0, distAcc = 0;
+  let totalAscent = 0, totalDescent = 0;
+  let maxGrade = -Infinity, minGrade = Infinity;
+  for (const s of segments) {
+    if (typeof s.score !== 'number') { neutralDist += s.distance; continue; }
+    if (s.score >  0.1) tailDist += s.distance;
+    else if (s.score < -0.1) headDist += s.distance;
+    else neutralDist += s.distance;
+    if (typeof s.windSpeed === 'number') { avgWindAcc += s.windSpeed * s.distance; distAcc += s.distance; }
+    if (typeof s.grade === 'number') {
+      const dz = (s.grade / 100) * s.distance;  // smoothing 된 grade 기반
+      if (dz > 0) totalAscent += dz;
+      else totalDescent += -dz;
+      if (s.grade > maxGrade) maxGrade = s.grade;
+      if (s.grade < minGrade) minGrade = s.grade;
+    }
+  }
+  if (!isFinite(maxGrade)) maxGrade = 0;
+  if (!isFinite(minGrade)) minGrade = 0;
+  const avgWindKmh = distAcc ? avgWindAcc / distAcc : 0;
+  const pct = m => totalM ? (m / totalM * 100).toFixed(1) + '%' : '-';
+  const fmt = d => d.toLocaleString('ko-KR', { hour12: false });
+
+  document.getElementById('stats').innerHTML = `
+    <span class="stat-pill"><strong>총 거리</strong> ${(totalM/1000).toFixed(1)} km</span>
+    <span class="stat-pill"><strong>예상 소요</strong> ${formatDuration(totalH)}</span>
+    <span class="stat-pill"><strong>도착 예상</strong> ${fmt(new Date(arriveMs))}</span>
+    <span class="stat-pill"><strong>평균 속도</strong> ${avgKmh.toFixed(1)} km/h</span>
+    <span class="stat-pill"><strong>평균 풍속</strong> ${(avgWindKmh/3.6).toFixed(1)} m/s</span>
+    ${kin && kin.restCount > 0 ? `<span class="stat-pill" style="background:#fff3d6; color:#7a4a00;"><strong>휴식</strong> ${kin.restCount}회 · 총 ${restMin}분 (라이딩 ${formatDuration(ridingMin/60)})</span>` : ''}
+    <span class="stat-pill" style="background:#d6f6ff; color:#005f7a;"><strong>순풍 구간</strong> ${(tailDist/1000).toFixed(1)}km (${pct(tailDist)})</span>
+    <span class="stat-pill" style="background:#fde0ec; color:#7a0033;"><strong>역풍 구간</strong> ${(headDist/1000).toFixed(1)}km (${pct(headDist)})</span>
+    ${totalAscent > 0 ? `<span class="stat-pill" style="background:#dcfce7; color:#14532d;"><strong>↗ 상승</strong> ${totalAscent.toFixed(0)} m</span>` : ''}
+    ${totalDescent > 0 ? `<span class="stat-pill" style="background:#e0e7ff; color:#312e81;"><strong>↘ 하강</strong> ${totalDescent.toFixed(0)} m</span>` : ''}
+    ${(maxGrade > 0 || minGrade < 0) ? `<span class="stat-pill" style="background:#f1f5f9;"><strong>경사</strong> 최대 ${maxGrade.toFixed(1)}% / ${minGrade.toFixed(1)}%</span>` : ''}
+  `;
+}
+function formatDuration(hours) {
+  const h = Math.floor(hours);
+  const m = Math.round((hours - h) * 60);
+  return `${h}h ${m}m`;
+}
+
+let elevMouseUp = null;
+let lastSegments = null;
+let lastAvgKmh   = null;
+let analysis     = null;  // 분석 결과 + 풍 캐시 (시각 조정용)
+
+
+function tailwindPct(segments) {
+  let tail = 0, head = 0;
+  for (const s of segments) {
+    if (typeof s.score !== 'number') continue;
+    const w = s.distance * Math.min(1, (s.windSpeed || 0) / 20);
+    if (s.score > 0) tail += w * s.score;
+    else if (s.score < 0) head += w * (-s.score);
+  }
+  const sum = tail + head;
+  return sum ? (tail / sum * 100) : 0;
+}
+
+
+function formatTimeShift(min) {
+  const sign = min === 0 ? '±' : (min > 0 ? '+' : '−');
+  const m = Math.abs(min);
+  const h = Math.floor(m / 60);
+  const rm = m % 60;
+  return h ? `${sign}${h}h ${rm}m` : `${sign}${rm}m`;
+}
+
+(function setupBestTimeButton() {
+  const btn    = document.getElementById('findBestTime');
+  const result = document.getElementById('bestResult');
+
+  btn.addEventListener('click', () => {
+    if (!analysis) return;
+    btn.disabled = true;
+    btn.textContent = '계산 중…';
+    setTimeout(() => {
+      const a = analysis;
+      const RANGE = 6 * 3600, STEP = 30 * 60;
+      let best = { tailPct: -1, deltaSec: 0 };
+      // 1) 25개 후보 시각 평가
+      for (let d = -RANGE; d <= RANGE; d += STEP) {
+        const newStart = a.startMs + d * 1000;
+        applyKinematics(a.segments, a.mode, a.speed, a.power, a.mass, newStart, a.restMin, a.restEvery);
+        mapWindToSegments(a.segments, a.cache);
+        const pct = tailwindPct(a.segments);
+        if (pct > best.tailPct) best = { tailPct: pct, deltaSec: d };
+      }
+      // 2) best 시각으로 정밀 적용 (kinematics + mapping + kinematics)
+      const newStart = a.startMs + best.deltaSec * 1000;
+      applyKinematics(a.segments, a.mode, a.speed, a.power, a.mass, newStart, a.restMin, a.restEvery);
+      mapWindToSegments(a.segments, a.cache);
+      const kin = applyKinematics(a.segments, a.mode, a.speed, a.power, a.mass, newStart, a.restMin, a.restEvery);
+      // 3) 모든 화면 재렌더
+      drawSegments(a.segments);
+      const totalM = a.segments.reduce((acc, s) => acc + s.distance, 0);
+      const totalH = (a.segments[a.segments.length-1].cumTimeSec || 0) / 3600;
+      const avgKmh = totalH > 0 ? (totalM/1000) / totalH : 0;
+      renderGauge(a.segments, totalH);
+      renderStats(a.segments, newStart, totalH, avgKmh, kin);
+      renderElevation(a.segments, avgKmh);
+      lastSegments = a.segments;
+      lastAvgKmh   = avgKmh;
+      // 4) baseline + 출발시각 input 동기화
+      a.startMs = newStart;
+      const d = new Date(newStart);
+      const pad2 = (n) => String(n).padStart(2, '0');
+      document.getElementById('startTime').value =
+        `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+
+      const minutes = Math.round(best.deltaSec / 60);
+      result.textContent = `최적 ${formatTimeShift(minutes)} 적용됨 → TAILWIND ${best.tailPct.toFixed(1)}%`;
+      btn.disabled = false;
+      btn.textContent = '⏱ 최적 시각';
+    }, 50);
+  });
+})();
+
+// ===== AI 코스 분석 프롬프트 빌더 + 모달 =====
+function buildAiPrompt() {
+  if (!analysis) return '';
+  const a = analysis;
+  const segs = a.segments;
+  if (!segs || !segs.length) return '';
+  const last = segs[segs.length - 1];
+  const totalKm = last.cumDistance / 1000;
+  const totalSec = last.cumTimeSec || 0;
+  const totalH = totalSec / 3600;
+  const startD = new Date(a.startMs);
+  const arriveD = new Date(a.startMs + totalH * 3600 * 1000);
+  const pad2 = n => String(n).padStart(2, '0');
+  const fmtDT = d => `${d.getFullYear()}-${pad2(d.getMonth()+1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  const fmtT  = d => `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+
+  let asc = 0, desc = 0, maxG = -Infinity, minG = Infinity;
+  let avgWindAcc = 0, distAcc = 0;
+  let tailDist = 0, headDist = 0;
+  let restCount = 0;
+  for (const s of segs) {
+    if (typeof s.grade === 'number') {
+      const dz = s.grade / 100 * s.distance;
+      if (dz > 0) asc += dz; else desc += -dz;
+      if (s.grade > maxG) maxG = s.grade;
+      if (s.grade < minG) minG = s.grade;
+    }
+    if (typeof s.windSpeed === 'number') {
+      avgWindAcc += s.windSpeed * s.distance; distAcc += s.distance;
+    }
+    if (typeof s.score === 'number') {
+      if (s.score > 0.1) tailDist += s.distance;
+      else if (s.score < -0.1) headDist += s.distance;
+    }
+  }
+  if (a.restMin > 0 && a.restEvery > 0) {
+    restCount = Math.max(0, Math.floor((totalKm - 0.1) / a.restEvery));
+  }
+  const avgWindKmh = distAcc ? avgWindAcc / distAcc : 0;
+  const tailPct = (tailDist / last.cumDistance * 100).toFixed(1);
+  const headPct = (headDist / last.cumDistance * 100).toFixed(1);
+  const avgKmh  = totalH > 0 ? (totalKm / totalH).toFixed(1) : '0';
+
+  // 10km 간격 샘플
+  const samples = [];
+  let nextSample = 0;
+  for (const s of segs) {
+    if (s.cumDistance / 1000 >= nextSample) {
+      const km = (s.cumDistance / 1000).toFixed(0);
+      const time = fmtT(new Date(s.etaMs));
+      const ele  = typeof s.b.ele === 'number' ? Math.round(s.b.ele) + 'm' : '—';
+      const grade = typeof s.grade === 'number' ? (s.grade >= 0 ? '+' : '') + s.grade.toFixed(1) + '%' : '—';
+      const temp = typeof s.temperature === 'number' ? s.temperature.toFixed(1) + '°C' : '—';
+      const wx   = s.weatherCode != null ? weatherText(s.weatherCode) : '—';
+      const ws   = typeof s.windSpeed === 'number' ? (s.windSpeed/3.6).toFixed(1) + 'm/s' : '—';
+      const tag  = typeof s.score === 'number'
+        ? (s.score > 0.1 ? '순풍' : s.score < -0.1 ? '역풍' : '측풍') : '—';
+      samples.push(`- ${String(km).padStart(3)}km / ${time} / 고도 ${ele} (${grade}) / ${wx} ${temp} / 풍 ${ws} ${tag}`);
+      nextSample += 10;
+    }
+  }
+
+  const restNote = (a.restMin > 0 && a.restEvery > 0)
+    ? `${a.restEvery}km마다 ${a.restMin}분 휴식 (총 ${restCount}회 ≈ ${restCount * a.restMin}분)`
+    : '휴식 없음';
+  const modeNote = a.mode === 'power'
+    ? `파워 ${a.power}W 기준 (체중+자전거 ${a.mass}kg)`
+    : `평속 ${a.speed} km/h 기준`;
+
+  const dirLabel = a.direction === 'reverse' ? '역방향' : a.direction === 'round' ? '왕복 (정방향+역방향)' : '정방향';
+  return `[자전거 라이딩 코스 분석]
+출발: ${fmtDT(startD)} (KST)
+도착 예상: ${fmtDT(arriveD)}
+방향: ${dirLabel}
+총 거리: ${totalKm.toFixed(1)} km
+예상 소요: ${Math.floor(totalH)}h ${Math.round((totalH - Math.floor(totalH)) * 60)}m (평균 ${avgKmh} km/h)
+계산 기준: ${modeNote}
+휴식: ${restNote}
+
+[지형]
+누적 상승: ${asc.toFixed(0)} m
+누적 하강: ${desc.toFixed(0)} m
+최대 경사: +${isFinite(maxG) ? maxG.toFixed(1) : '0'}% / ${isFinite(minG) ? minG.toFixed(1) : '0'}%
+
+[풍 (Open-Meteo ECMWF 기준)]
+평균 풍속: ${(avgWindKmh/3.6).toFixed(1)} m/s
+순풍 구간: ${(tailDist/1000).toFixed(1)} km (${tailPct}%)
+역풍 구간: ${(headDist/1000).toFixed(1)} km (${headPct}%)
+
+[10km 구간별 시각·고도·경사·날씨·풍]
+${samples.join('\n')}
+
+[질문]
+이 라이딩 코스에 대해 다음 항목을 한국어로 구체적으로 추천해주세요:
+1. 복장 (상의·하의·장갑·모자·바람막이 등) — 출발 시각의 기온과 도중 변화 고려
+2. 수분·식량 보급 타이밍 (몇 km / 몇 시 지점에 무엇을, 얼마나)
+3. 페이스 전략 — 오르막·내리막·역풍 구간을 어떻게 분배할지
+4. 주의 구간 — 가파른 경사·강한 역풍·급격한 기온 변화 등이 있는 km 지점
+5. 출발 직전 식사와 라이딩 후 회복 식사 가이드`;
+}
+
+(function setupAiPromptModal() {
+  const btn   = document.getElementById('aiPrompt');
+  const modal = document.getElementById('aiModal');
+  const close = document.getElementById('aiClose');
+  const ta    = document.getElementById('aiPromptText');
+  const copy  = document.getElementById('aiCopy');
+
+  btn.addEventListener('click', () => {
+    if (!analysis) return;
+    ta.value = buildAiPrompt();
+    modal.style.display = 'flex';
+    setTimeout(() => ta.focus(), 50);
+  });
+  close.addEventListener('click', () => { modal.style.display = 'none'; });
+  modal.addEventListener('click', (e) => { if (e.target === modal) modal.style.display = 'none'; });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && modal.style.display === 'flex') modal.style.display = 'none';
+  });
+
+  copy.addEventListener('click', async () => {
+    const text = ta.value;
+    let ok = false;
+    try {
+      await navigator.clipboard.writeText(text);
+      ok = true;
+    } catch (e) {
+      // fallback
+      ta.select();
+      try { ok = document.execCommand('copy'); } catch (e2) {}
+    }
+    if (ok) {
+      copy.textContent = '✓ 복사됨';
+      copy.classList.add('copied');
+      setTimeout(() => {
+        copy.textContent = '📋 클립보드에 복사';
+        copy.classList.remove('copied');
+      }, 1800);
+    } else {
+      copy.textContent = '⚠ 직접 선택해서 복사하세요';
+    }
+  });
+})();
+
+// 그래프 영역 세로 크기 리사이즈 (가로 핸들) — 마우스 + 터치
+// 브라우저 창 크기 변경 → 그래프 + 지도 동기화 (200ms debounce)
+(function setupWindowResize(){
+  let timer = null;
+  window.addEventListener('resize', () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => {
+      map.invalidateSize();
+      if (lastSegments) renderElevation(lastSegments, lastAvgKmh);
+    }, 200);
+  });
+})();
+
+(function setupResizer(){
+  const resizer = document.getElementById('elevResizer');
+  const elevDiv = document.getElementById('elevation');
+  let dragging = false, startY = 0, startH = 0, rafId = 0;
+
+  const onStart = (clientY) => {
+    dragging = true;
+    startY = clientY;
+    startH = elevDiv.clientHeight;
+    document.body.style.userSelect = 'none';
+    resizer.classList.add('active');
+  };
+  const onMove = (clientY) => {
+    if (!dragging) return;
+    const dy = startY - clientY; // 위로 → 그래프 커짐
+    const newH = Math.max(80, Math.min(window.innerHeight - 240, startH + dy));
+    elevDiv.style.height = newH + 'px';
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = requestAnimationFrame(() => map.invalidateSize());
+  };
+  const onEnd = () => {
+    if (!dragging) return;
+    dragging = false;
+    document.body.style.userSelect = '';
+    resizer.classList.remove('active');
+    map.invalidateSize();
+    if (lastSegments) renderElevation(lastSegments, lastAvgKmh);
+  };
+
+  resizer.addEventListener('mousedown', (e) => { e.preventDefault(); onStart(e.clientY); });
+  document.addEventListener('mousemove', (e) => onMove(e.clientY));
+  document.addEventListener('mouseup', onEnd);
+
+  resizer.addEventListener('touchstart', (e) => {
+    if (!e.touches[0]) return;
+    e.preventDefault();
+    onStart(e.touches[0].clientY);
+  }, { passive: false });
+  document.addEventListener('touchmove', (e) => {
+    if (!dragging) return;
+    if (!e.touches[0]) return;
+    e.preventDefault();
+    onMove(e.touches[0].clientY);
+  }, { passive: false });
+  document.addEventListener('touchend', onEnd);
+  document.addEventListener('touchcancel', onEnd);
+})();
+
+// ============================================================
+// 하단 고도 + 속도 그래프 (Canvas, dual layer)
+//   - bg canvas: 정적 (그리드/축/라벨/area/라인) — 한 번만 그림
+//   - fg canvas: 동적 (cursor/dot/label/brush) — 호버 시 갱신
+//   - 색상별 batch stroke로 ~3K segment를 5~10번 stroke로 처리
+// ============================================================
+function renderElevation(segments, baseSpeed) {
+  const div = document.getElementById('elevation');
+  div.innerHTML = '';
+  hoverLayer.clearLayers();
+
+  if (!segments.some(s => typeof s.a.ele === 'number')) {
+    div.innerHTML = '<div class="elev-empty">GPX 파일에 고도(ele) 정보가 없습니다.</div>';
+    return;
+  }
+
+  const W = div.clientWidth, H = div.clientHeight;
+  const padL = 44, padR = 44, padT = 10, padB = 22;
+  const innerW = W - padL - padR;
+  const innerH = H - padT - padB;
+  const totalKm = segments[segments.length - 1].cumDistance / 1000;
+
+  let minE = Infinity, maxE = -Infinity;
+  for (const s of segments) {
+    if (typeof s.a.ele === 'number') { if (s.a.ele < minE) minE = s.a.ele; if (s.a.ele > maxE) maxE = s.a.ele; }
+    if (typeof s.b.ele === 'number') { if (s.b.ele < minE) minE = s.b.ele; if (s.b.ele > maxE) maxE = s.b.ele; }
+  }
+  const eleMin = Math.floor(minE / 10) * 10;
+  const eleMax = Math.ceil(Math.max(maxE, minE + 10) / 10) * 10;
+  const eleSpan = eleMax - eleMin;
+  let minV = Infinity, maxV = -Infinity;
+  for (const s of segments) {
+    const v = s.effectiveSpeed;
+    if (typeof v === 'number') { if (v < minV) minV = v; if (v > maxV) maxV = v; }
+  }
+  if (!isFinite(minV)) { minV = baseSpeed - 5; maxV = baseSpeed + 5; }
+  minV = Math.min(minV, baseSpeed); maxV = Math.max(maxV, baseSpeed);
+  const vMin = Math.floor((minV - 1) / 2) * 2;
+  const vMax = Math.ceil((maxV + 1) / 2) * 2;
+  const vSpan = Math.max(vMax - vMin, 4);
+
+  const xOf  = km => padL + (km / totalKm) * innerW;
+  const yEle = e  => padT + (1 - (e - eleMin) / eleSpan) * innerH;
+  const yV   = v  => padT + (1 - (v - vMin)   / vSpan)   * innerH;
+
+  // ---- canvas 두 개 + tooltip ----
+  const dpr = window.devicePixelRatio || 1;
+  const mkCanvas = () => {
+    const c = document.createElement('canvas');
+    c.width = W * dpr; c.height = H * dpr;
+    c.style.cssText = `position:absolute;left:0;top:0;width:${W}px;height:${H}px;display:block;`;
+    return c;
+  };
+  const bgCanvas = mkCanvas();
+  const fgCanvas = mkCanvas();
+  fgCanvas.style.cursor = 'crosshair';
+  fgCanvas.style.touchAction = 'none';
+  div.appendChild(bgCanvas);
+  div.appendChild(fgCanvas);
+  const bg = bgCanvas.getContext('2d');
+  const fg = fgCanvas.getContext('2d');
+  bg.scale(dpr, dpr); fg.scale(dpr, dpr);
+
+  const tooltip = document.createElement('div');
+  tooltip.className = 'elev-tooltip';
+  tooltip.innerHTML =
+      '<span class="t-km e"></span>'
+    + '<span class="sep">|</span>고도 <span class="t-ele e"></span>'
+    + '<span class="sep">|</span>경사 <span class="t-grade"></span>'
+    + '<span class="sep">|</span>속도 <span class="t-speed"></span>'
+    + '<span class="sep">|</span>풍 <span class="t-wind"></span>'
+    + '<span class="sep">|</span>날씨 <span class="t-wx e"></span>'
+    + '<span class="sep">|</span>기온 <span class="t-temp e"></span>'
+    + '<span class="t-rain"></span>'
+    + '<span class="t-hum"></span>'
+    + '<span class="sep">|</span>도착 <span class="t-eta e"></span>';
+  div.appendChild(tooltip);
+  const tEl = {
+    km: tooltip.querySelector('.t-km'),
+    ele: tooltip.querySelector('.t-ele'),
+    grade: tooltip.querySelector('.t-grade'),
+    speed: tooltip.querySelector('.t-speed'),
+    wind: tooltip.querySelector('.t-wind'),
+    wx: tooltip.querySelector('.t-wx'),
+    temp: tooltip.querySelector('.t-temp'),
+    rain: tooltip.querySelector('.t-rain'),
+    hum: tooltip.querySelector('.t-hum'),
+    eta: tooltip.querySelector('.t-eta'),
+  };
+
+  // ===== bg 그리기 (한 번만) =====
+  function drawBg() {
+    bg.clearRect(0, 0, W, H);
+    bg.font = '10px -apple-system,system-ui,sans-serif';
+    bg.lineWidth = 1;
+    for (let i = 0; i <= 4; i++) {
+      const t = i / 4;
+      const y = padT + (1 - t) * innerH;
+      bg.strokeStyle = '#eee';
+      bg.beginPath(); bg.moveTo(padL, y); bg.lineTo(W - padR, y); bg.stroke();
+      bg.fillStyle = '#888'; bg.textAlign = 'right';
+      bg.fillText((eleMin + eleSpan * t).toFixed(0) + 'm', padL - 6, y + 3);
+      bg.fillStyle = '#1976d2'; bg.textAlign = 'left';
+      bg.fillText((vMin + vSpan * t).toFixed(0), W - padR + 6, y + 3);
+    }
+    bg.font = '9px -apple-system,system-ui,sans-serif';
+    bg.fillStyle = '#1976d2'; bg.textAlign = 'left';
+    bg.fillText('km/h', W - padR + 6, padT - 1);
+    bg.font = '10px -apple-system,system-ui,sans-serif';
+    bg.fillStyle = '#888'; bg.textAlign = 'center';
+    const xTicks = totalKm > 50 ? 6 : 5;
+    for (let i = 0; i <= xTicks; i++) {
+      const km = totalKm * i / xTicks;
+      bg.fillText(km.toFixed(0) + 'km', xOf(km), H - 6);
+    }
+    // 고도 area
+    bg.beginPath();
+    bg.moveTo(xOf(0), yEle(eleMin));
+    bg.lineTo(xOf(0), yEle(segments[0].a.ele ?? eleMin));
+    for (const s of segments) bg.lineTo(xOf(s.cumDistance / 1000), yEle(s.b.ele ?? eleMin));
+    bg.lineTo(xOf(totalKm), yEle(eleMin));
+    bg.closePath();
+    bg.fillStyle = 'rgba(216,216,216,0.7)';
+    bg.fill();
+    // 고도 라인 (색상별 batch stroke)
+    const elePaths = new Map();
+    for (const s of segments) {
+      const km1 = (s.cumDistance - s.distance) / 1000;
+      const km2 = s.cumDistance / 1000;
+      const e1 = s.a.ele ?? eleMin;
+      const e2 = s.b.ele ?? eleMin;
+      const color = (typeof s.score === 'number') ? scoreColor(s.score, s.windSpeed) : '#888';
+      let coords = elePaths.get(color);
+      if (!coords) { coords = []; elePaths.set(color, coords); }
+      coords.push(xOf(km1), yEle(e1), xOf(km2), yEle(e2));
+    }
+    bg.lineWidth = 2.5; bg.lineCap = 'round';
+    for (const [color, coords] of elePaths) {
+      bg.strokeStyle = color;
+      bg.beginPath();
+      for (let i = 0; i < coords.length; i += 4) {
+        bg.moveTo(coords[i], coords[i+1]); bg.lineTo(coords[i+2], coords[i+3]);
+      }
+      bg.stroke();
+    }
+    // 평속 점선
+    bg.strokeStyle = 'rgba(25,118,210,0.4)';
+    bg.lineWidth = 1; bg.setLineDash([4, 3]);
+    bg.beginPath(); bg.moveTo(padL, yV(baseSpeed)); bg.lineTo(W - padR, yV(baseSpeed)); bg.stroke();
+    bg.setLineDash([]);
+    // 속도 라인 (색상별 batch)
+    const vPaths = new Map();
+    let prevV = null, prevKm = 0;
+    for (const s of segments) {
+      const km = s.cumDistance / 1000;
+      const v = s.effectiveSpeed;
+      if (typeof v !== 'number') { prevV = null; continue; }
+      if (prevV != null) {
+        const color = (typeof s.score === 'number') ? scoreColor(s.score, s.windSpeed) : '#94a3b8';
+        let coords = vPaths.get(color);
+        if (!coords) { coords = []; vPaths.set(color, coords); }
+        coords.push(xOf(prevKm), yV(prevV), xOf(km), yV(v));
+      }
+      prevV = v; prevKm = km;
+    }
+    bg.lineWidth = 2.2; bg.globalAlpha = 0.95;
+    for (const [color, coords] of vPaths) {
+      bg.strokeStyle = color;
+      bg.beginPath();
+      for (let i = 0; i < coords.length; i += 4) {
+        bg.moveTo(coords[i], coords[i+1]); bg.lineTo(coords[i+2], coords[i+3]);
+      }
+      bg.stroke();
+    }
+    bg.globalAlpha = 1;
+  }
+  drawBg();
+
+  // ===== fg 그리기 (호버 시) =====
+  function drawFg(state) {
+    fg.clearRect(0, 0, W, H);
+    if (!state) return;
+    if (state.brush) {
+      const { x1, x2 } = state.brush;
+      fg.fillStyle = 'rgba(25,118,210,0.18)';
+      fg.fillRect(x1, padT, x2 - x1, innerH);
+      fg.strokeStyle = 'rgba(25,118,210,0.7)'; fg.lineWidth = 1;
+      fg.strokeRect(x1, padT, x2 - x1, innerH);
+    }
+    if (state.cursorX != null) {
+      fg.strokeStyle = '#333'; fg.lineWidth = 1;
+      fg.beginPath();
+      fg.moveTo(state.cursorX, padT); fg.lineTo(state.cursorX, H - padB);
+      fg.stroke();
+    }
+    const s = state.seg;
+    if (s) {
+      const xx = xOf(s.cumDistance / 1000);
+      const farRight = xx > W - padR - 70;
+      const labX = xx + (farRight ? -8 : 8);
+      const align = farRight ? 'right' : 'left';
+      const drawDot = (x, y, fill) => {
+        fg.beginPath(); fg.arc(x, y, 4, 0, Math.PI * 2);
+        fg.fillStyle = fill; fg.fill();
+        fg.strokeStyle = '#fff'; fg.lineWidth = 1.5; fg.stroke();
+      };
+      const drawLab = (x, y, text, fill) => {
+        fg.font = 'bold 12px -apple-system,system-ui,sans-serif';
+        fg.textAlign = align;
+        fg.lineWidth = 3; fg.lineJoin = 'round';
+        fg.strokeStyle = '#fff'; fg.strokeText(text, x, y);
+        fg.fillStyle = fill; fg.fillText(text, x, y);
+      };
+      const ele = s.b.ele;
+      if (typeof ele === 'number') {
+        const ey = yEle(ele);
+        drawDot(xx, ey, '#444');
+        drawLab(labX, ey - 8, ele.toFixed(0) + ' m', '#222');
+      }
+      const v = s.effectiveSpeed;
+      if (typeof v === 'number') {
+        const vy = yV(v);
+        drawDot(xx, vy, '#1976d2');
+        drawLab(labX, vy + 14, v.toFixed(1) + ' km/h', '#1976d2');
+      }
+    }
+  }
+
+  function updateTooltip(s) {
+    const pad2 = n => String(n).padStart(2, '0');
+    const eta = new Date(s.etaMs);
+    const ele = s.b.ele;
+    const v = s.effectiveSpeed;
+    tEl.km.textContent = (s.cumDistance / 1000).toFixed(1) + ' km';
+    tEl.ele.textContent = (typeof ele === 'number') ? ele.toFixed(0) + ' m' : '—';
+    if (typeof s.grade === 'number') {
+      const arrow = s.grade > 0.3 ? '↗' : s.grade < -0.3 ? '↘' : '→';
+      tEl.grade.textContent = arrow + ' ' + s.grade.toFixed(1) + '%';
+      tEl.grade.className = 't-grade ' + (s.grade > 0.3 ? 'head' : s.grade < -0.3 ? 'tail' : 'e');
+    } else { tEl.grade.textContent = '—'; tEl.grade.className = 't-grade'; }
+    if (typeof v === 'number') { tEl.speed.textContent = v.toFixed(1) + ' km/h'; tEl.speed.className = 't-speed v'; }
+    else { tEl.speed.textContent = '—'; tEl.speed.className = 't-speed'; }
+    if (typeof s.windSpeed === 'number') {
+      const tag = s.score > 0.05 ? '순풍' : s.score < -0.05 ? '역풍' : '중립';
+      tEl.wind.textContent = (s.windSpeed/3.6).toFixed(1) + ' m/s ' + tag;
+      tEl.wind.className = 't-wind ' + (s.score > 0.05 ? 'tail' : s.score < -0.05 ? 'head' : 'e');
+    } else { tEl.wind.textContent = '—'; tEl.wind.className = 't-wind'; }
+    tEl.wx.textContent = (s.weatherCode != null) ? weatherEmoji(s.weatherCode) + ' ' + weatherText(s.weatherCode) : '—';
+    tEl.temp.textContent = (typeof s.temperature === 'number') ? s.temperature.toFixed(1) + '°C' : '—';
+    tEl.rain.textContent = (s.precip != null && s.precip >= 0.05) ? ' | 강수 💧' + s.precip.toFixed(1) + 'mm' : '';
+    tEl.hum.textContent = (s.humidity != null) ? ' | 습도 ' + s.humidity.toFixed(0) + '%' : '';
+    tEl.eta.textContent = pad2(eta.getHours()) + ':' + pad2(eta.getMinutes());
+    tooltip.style.display = 'block';
+  }
+
+  // ===== 인터랙션 =====
+  let state = { cursorX: null, seg: null, brush: null };
+  let lastSeg = null, dragStart = null, mmRaf = 0, mmEv = null;
+
+  function hideHover() {
+    state = { cursorX: null, seg: null, brush: null };
+    drawFg(null);
+    tooltip.style.display = 'none';
+    clearHoverMarkers();
+    lastSeg = null;
+  }
+
+  function handleMove(clientX) {
+    const rect = fgCanvas.getBoundingClientRect();
+    const px = clientX - rect.left;
+    if (dragStart != null) {
+      const x1 = Math.max(padL, Math.min(W - padR, Math.min(dragStart, px)));
+      const x2 = Math.max(padL, Math.min(W - padR, Math.max(dragStart, px)));
+      state.brush = { x1, x2 };
+      drawFg(state);
+      return;
+    }
+    state.cursorX = Math.max(padL, Math.min(W - padR, px));
+    const target = ((px - padL) / innerW) * totalKm * 1000;
+    const s = findSegmentByDist(segments, target);
+    if (!s) { drawFg(state); return; }
+    if (s !== lastSeg) {
+      lastSeg = s;
+      state.seg = s;
+      updateTooltip(s);
+      showWindAnimation(s, [s.b.lat, s.b.lon]);
+    }
+    drawFg(state);
+  }
+
+  fgCanvas.addEventListener('mousemove', (ev) => {
+    mmEv = ev;
+    if (mmRaf) return;
+    mmRaf = requestAnimationFrame(() => { mmRaf = 0; handleMove(mmEv.clientX); });
+  });
+  fgCanvas.addEventListener('mouseleave', () => {
+    if (mmRaf) { cancelAnimationFrame(mmRaf); mmRaf = 0; }
+    hideHover();
+  });
+
+  fgCanvas.addEventListener('mousedown', (ev) => {
+    const rect = fgCanvas.getBoundingClientRect();
+    dragStart = ev.clientX - rect.left;
+    state.brush = { x1: dragStart, x2: dragStart };
+    drawFg(state);
+    tooltip.style.display = 'none';
+    ev.preventDefault();
+  });
+  if (elevMouseUp) document.removeEventListener('mouseup', elevMouseUp);
+  elevMouseUp = (ev) => {
+    if (dragStart == null) return;
+    const rect = fgCanvas.getBoundingClientRect();
+    const x = ev.clientX - rect.left;
+    const x1 = Math.min(dragStart, x), x2 = Math.max(dragStart, x);
+    state.brush = null;
+    drawFg(state);
+    if (x2 - x1 > 4) {
+      const km1 = ((x1 - padL) / innerW) * totalKm;
+      const km2 = ((x2 - padL) / innerW) * totalKm;
+      const ll = [];
+      for (const s of segments) {
+        const k = s.cumDistance / 1000;
+        if (k >= km1 - 0.5 && k <= km2 + 0.5) {
+          ll.push([s.a.lat, s.a.lon]); ll.push([s.b.lat, s.b.lon]);
+        }
+      }
+      if (ll.length) map.fitBounds(ll, { padding: [40, 40] });
+    }
+    dragStart = null;
+  };
+  document.addEventListener('mouseup', elevMouseUp);
+
+  fgCanvas.addEventListener('dblclick', () => {
+    const ll = [];
+    for (const s of segments) { ll.push([s.a.lat, s.a.lon]); ll.push([s.b.lat, s.b.lon]); }
+    if (ll.length) map.fitBounds(ll, { padding: [40, 40] });
+  });
+
+  fgCanvas.addEventListener('wheel', (ev) => {
+    ev.preventDefault();
+    const rect = fgCanvas.getBoundingClientRect();
+    const px = ev.clientX - rect.left;
+    const target = ((px - padL) / innerW) * totalKm * 1000;
+    const s = findSegmentByDist(segments, target);
+    if (!s) return;
+    const dir = ev.deltaY < 0 ? 0.75 : -0.75;  // 0.75 단위 섬세 줌
+    const z = Math.max(map.getMinZoom(), Math.min(map.getMaxZoom(), map.getZoom() + dir));
+    map.setView([s.b.lat, s.b.lon], z, { animate: true });
+  }, { passive: false });
+
+  // 모바일 터치
+  const onTouch = (ev) => {
+    const t = ev.touches[0] || ev.changedTouches[0];
+    if (!t) return;
+    ev.preventDefault();
+    handleMove(t.clientX);
+  };
+  fgCanvas.addEventListener('touchstart', onTouch, { passive: false });
+  fgCanvas.addEventListener('touchmove',  onTouch, { passive: false });
+  let lastTapMs = 0;
+  fgCanvas.addEventListener('touchend', () => {
+    setTimeout(() => { if (!dragStart) hideHover(); }, 1800);
+    const now = Date.now();
+    if (now - lastTapMs < 320) {
+      const ll = [];
+      for (const s of segments) { ll.push([s.a.lat, s.a.lon]); ll.push([s.b.lat, s.b.lon]); }
+      if (ll.length) map.fitBounds(ll, { padding: [40, 40] });
+    }
+    lastTapMs = now;
+  });
+}
+
+let gpxText = null;
+// 🛰 GPS 추적: watchPosition으로 위치 변화에 따라 지도 자동 따라가기 (heading-up)
+(function setupTrackToggle() {
+  const btn = document.getElementById('trackToggle');
+  function onPos(pos) {
+    const lat = pos.coords.latitude;
+    const lon = pos.coords.longitude;
+    const h = computeTrackHeading(lat, lon, pos.coords.heading);
+
+    // 1) 줌/팬 먼저 — 첫 fix는 즉시 setView (animate 없이)
+    if (trackFirstFix) {
+      trackFirstFix = false;
+      map.setView([lat, lon], 17, { animate: false });
+    } else {
+      map.panTo([lat, lon], { animate: true, duration: 0.6 });
+    }
+    // 2) 마커 + 툴팁 — 분석된 segment 또는 캐시된 trackWind 활용 (즉시)
+    updateCurrentLocationMarker(lat, lon);
+    updateLocMarkerWindColor(lat, lon, h);
+    updateTrackTooltip(lat, lon, h);
+    // 3) 풍 fetch (분석 안 했을 때) — 비동기 결과로 마커·툴팁 다시 갱신
+    fetchCurrentWindForTracking(lat, lon).then(() => {
+      updateCurrentLocationMarker(lat, lon);
+      updateLocMarkerWindColor(lat, lon, h);
+      updateTrackTooltip(lat, lon, h);
+    });
+    // 4) heading-up 회전 (heading 추정됐을 때만, compass 모드면 compass에 양보)
+    if (h != null && !compassMode) applyMapRotation(h);
+
+    document.getElementById('status').textContent =
+      `🛰 추적: ${lat.toFixed(5)}, ${lon.toFixed(5)}` + (h != null ? ` (${h.toFixed(0)}°)` : '');
+  }
+  function start() {
+    if (!navigator.geolocation) {
+      document.getElementById('status').textContent = '브라우저가 위치 API를 지원하지 않습니다.';
+      return;
+    }
+    trackFirstFix = true;
+    trackHeadingPrev = null;
+    trackHeadingSmooth = null;
+    trackWatchId = navigator.geolocation.watchPosition(onPos, (err) => {
+      document.getElementById('status').textContent = '추적 오류: ' + err.message;
+      stop();
+    }, { enableHighAccuracy: true, maximumAge: 2000, timeout: 15000 });
+    btn.classList.add('active');
+    btn.textContent = '🛰 추적 중 (탭하여 중지)';
+    document.getElementById('panel').classList.add('tracking');
+    document.getElementById('status').textContent = 'GPS 추적 중…';
+    autoCollapseOnMobile();
+  }
+  function stop() {
+    if (trackWatchId != null) {
+      navigator.geolocation.clearWatch(trackWatchId);
+      trackWatchId = null;
+    }
+    clearMapRotation();
+    clearTrackTooltip();
+    btn.classList.remove('active');
+    btn.textContent = '🛰 추적 시작';
+    document.getElementById('panel').classList.remove('tracking');
+  }
+  btn.addEventListener('click', () => {
+    if (trackWatchId != null) stop(); else start();
+  });
+})();
+
+// 📍 현재 GPS 위치 표시 (+ GPX가 있으면 가장 가까운 점부터 분석)
+document.getElementById('useCurrentLoc').addEventListener('click', () => {
+  const status = document.getElementById('status');
+  const btn = document.getElementById('useCurrentLoc');
+  if (!navigator.geolocation) { status.textContent = '브라우저가 위치 API를 지원하지 않습니다.'; return; }
+  btn.disabled = true;
+  const prevLabel = btn.textContent;
+  btn.textContent = '📍 위치 확인 중…';
+  status.textContent = '현재 위치 확인 중…';
+  navigator.geolocation.getCurrentPosition(async (pos) => {
+    btn.disabled = false;
+    btn.textContent = prevLabel;
+    const lat = pos.coords.latitude;
+    const lon = pos.coords.longitude;
+
+    // 1) 지도 줌·이동 (이미지 수준 줌 17)
+    map.setView([lat, lon], 17, { animate: true });
+
+    // 2) 출발 시각을 지금으로 갱신
+    const now = new Date();
+    const pad = n => String(n).padStart(2, '0');
+    document.getElementById('startTime').value =
+      `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`;
+
+    // 3) 현재 위치 풍 데이터 fetch (분석 안 했어도 동작)
+    await fetchCurrentWindForTracking(lat, lon);
+
+    // 4) 펄스 마커 + 풍 입자 + 마커 아래 툴팁 표시 (정지 상태라 heading 미정)
+    updateCurrentLocationMarker(lat, lon);
+    updateLocMarkerWindColor(lat, lon, null);
+    updateTrackTooltip(lat, lon, null);
+
+    // 5) GPX가 있으면 가까운 점부터 분석 시작 (분석 후에도 줌 17 유지)
+    if (gpxText) {
+      const oriented = applyDirection(parseGPX(gpxText), document.getElementById('direction').value);
+      const { distance } = findNearestPointIndex(oriented, lat, lon);
+      if (distance > 5000) {
+        if (!confirm(`현재 위치가 GPX 경로에서 ${(distance/1000).toFixed(1)}km 떨어져 있습니다.\n계속 진행할까요?`)) {
+          status.textContent = `현재 위치 (${lat.toFixed(5)}, ${lon.toFixed(5)}) — 분석 취소`;
+          return;
+        }
+      }
+      pendingStartLatLon = { lat, lon };
+      skipNextFitBounds = true;  // 분석 후 줌 17 유지 (fitBounds 건너뜀)
+      status.textContent = `현재 위치 (${lat.toFixed(5)}, ${lon.toFixed(5)}) 기준으로 분석 시작…`;
+      document.getElementById('run').click();
+    } else {
+      status.textContent = `현재 위치 (${lat.toFixed(5)}, ${lon.toFixed(5)}) 표시 — GPX 업로드 후 [분석] 클릭 시 코스 분석`;
+    }
+  }, (err) => {
+    btn.disabled = false;
+    btn.textContent = prevLabel;
+    status.textContent = '위치 가져오기 실패: ' + err.message;
+  }, { enableHighAccuracy: true, timeout: 10000, maximumAge: 30000 });
+});
+
+document.getElementById('gpx').addEventListener('change', async (ev) => {
+  const f = ev.target.files[0];
+  if (!f) return;
+  gpxText = await f.text();
+  document.getElementById('status').textContent = `${f.name} 로드됨 (${(f.size/1024).toFixed(1)} KB)`;
+});
+
+// 입력 모드 토글 (평속 ↔ 파워)
+document.getElementById('mode').addEventListener('change', (e) => {
+  const power = e.target.value === 'power';
+  document.getElementById('speedLabel').style.display  = power ? 'none' : '';
+  document.getElementById('powerLabel').style.display  = power ? '' : 'none';
+  document.getElementById('weightLabel').style.display = power ? '' : 'none';
+});
+
+document.getElementById('run').addEventListener('click', async () => {
+  const status = document.getElementById('status');
+  const btn = document.getElementById('run');
+  if (!gpxText) { status.textContent = 'GPX 파일을 먼저 선택하세요.'; return; }
+  const startStr = document.getElementById('startTime').value;
+  if (!startStr) { status.textContent = '출발 시각을 입력하세요.'; return; }
+  const mode = document.getElementById('mode').value;
+  const speedKmh = parseFloat(document.getElementById('speed').value);
+  const powerW   = parseFloat(document.getElementById('power').value);
+  const massKg   = parseFloat(document.getElementById('weight').value);
+  const restMin  = parseFloat(document.getElementById('restMin').value) || 0;
+  const restEveryKm = parseFloat(document.getElementById('restEveryKm').value) || 0;
+  if (mode === 'speed' && !(speedKmh > 0)) { status.textContent = '평속을 올바르게 입력하세요.'; return; }
+  if (mode === 'power' && !(powerW > 0))   { status.textContent = '파워를 올바르게 입력하세요.'; return; }
+  const model = 'ecmwf_ifs025'; // ECMWF 고정
+
+  btn.disabled = true;
+  try {
+    const startMs = new Date(startStr).getTime();
+    const direction = document.getElementById('direction').value;
+    let rawPts = parseGPX(gpxText);
+
+    // 현재 위치 기준이면 가장 가까운 점부터 자르기 (방향 적용 전)
+    let trimNote = '';
+    if (pendingStartLatLon) {
+      const oriented = applyDirection(rawPts, direction);
+      const { index, distance } = findNearestPointIndex(oriented, pendingStartLatLon.lat, pendingStartLatLon.lon);
+      if (oriented.length - index < 2) {
+        throw new Error('현재 위치가 GPX 경로 끝부분이거나 너무 멀어 분석할 수 없습니다.');
+      }
+      rawPts = oriented.slice(index);
+      trimNote = ` (현재위치 ~${(distance).toFixed(0)}m, ${index}점 건너뜀)`;
+      pendingStartLatLon = null;  // 1회 사용 후 해제
+    }
+
+    status.textContent = `트랙 포인트 ${rawPts.length}개${trimNote} → 고도 확인 중…`;
+    const filled = await fillElevationIfMissing(rawPts, status);
+    // 현재위치 trim을 이미 한 경우엔 oriented 점을 그대로 사용 (중복 방지)
+    const pts = trimNote ? rawPts : applyDirection(rawPts, direction);
+    const dirLabel = direction === 'reverse' ? '역방향' : direction === 'round' ? '왕복' : '정방향';
+    if (filled > 0) status.textContent = `고도 ${filled}개 보강 → ${dirLabel} segment 생성 중…`;
+    else status.textContent = `${dirLabel} segment 생성 중…`;
+    const initialKmh = (mode === 'speed') ? speedKmh : 25;
+    const segs = buildSegments(pts, startMs, initialKmh);
+    if (segs.length === 0) throw new Error('유효한 segment가 없습니다.');
+    status.textContent = `segment ${segs.length}개. 풍 데이터 조회 중… (모델: ${model})`;
+    // 1) 좌표 그리드별 hourly 데이터 fetch (캐시)
+    const windCache = await fetchWindGrid(segs, status, model);
+    // 2) 1차 매핑 (1차 ETA 기준)
+    mapWindToSegments(segs, windCache);
+    // 3) 휴식 반영 ETA + 속도 계산
+    let kin = applyKinematics(segs, mode, speedKmh, powerW, massKg, startMs, restMin, restEveryKm);
+    // 4) 보정된 ETA로 풍 재매핑 → 5) 한 번 더 계산하여 score/속도 정합성 확보
+    mapWindToSegments(segs, windCache);
+    kin = applyKinematics(segs, mode, speedKmh, powerW, massKg, startMs, restMin, restEveryKm);
+
+    drawSegments(segs);
+    const totalM = segs.reduce((a, s) => a + s.distance, 0);
+    const totalH = (segs[segs.length-1].cumTimeSec || 0) / 3600;
+    const avgKmh = totalH > 0 ? (totalM/1000) / totalH : (speedKmh || 0);
+    renderGauge(segs, totalH);
+    renderStats(segs, startMs, totalH, avgKmh, kin);
+    renderElevation(segs, avgKmh);
+    lastSegments = segs;
+    lastAvgKmh   = avgKmh;
+
+    // 최적시각 추천용 컨텍스트 저장 + 버튼 활성화
+    analysis = {
+      segments: segs, cache: windCache, startMs,
+      mode, speed: speedKmh, power: powerW, mass: massKg,
+      restMin, restEvery: restEveryKm,
+      direction
+    };
+    document.getElementById('findBestTime').disabled = false;
+    document.getElementById('aiPrompt').disabled = false;
+    document.getElementById('bestResult').textContent = '';
+    autoCollapseOnMobile();
+    const restNote = kin.restCount > 0
+      ? `, 휴식 ${kin.restCount}회 ×${restMin}분`
+      : '';
+    status.textContent = `완료 (${dirLabel}, segment ${segs.length}개, 평균 ${avgKmh.toFixed(1)} km/h${restNote})`;
+  } catch (e) {
+    console.error(e);
+    status.textContent = '오류: ' + e.message;
+  } finally {
+    btn.disabled = false;
+  }
+});
+</script>
+</body>
+</html>
