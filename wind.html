@@ -408,6 +408,19 @@
   .elev-empty {
     padding:20px; color:#888; font-size:13px; text-align:center;
   }
+  /* 지도 좌측 하단 빌드 버전 오버레이 (PWA 패널 접힘 상태에서도 식별용) */
+  .build-ver-overlay.leaflet-control {
+    font-size: 10px;
+    color: #475569;
+    background: rgba(255,255,255,0.85);
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    box-shadow: 0 1px 3px rgba(15,23,42,0.15);
+    user-select: all;
+    margin-left: 8px !important;
+    margin-bottom: calc(8px + env(safe-area-inset-bottom, 0px)) !important;
+  }
 
   /* 추적 모드 마커 툴팁 (영구 표시, 마커 아래) */
   .leaflet-tooltip.track-tooltip {
@@ -719,6 +732,13 @@
 <script>
 "use strict";
 
+// ===== 빌드 버전 (캐시된 구버전 식별용 — 매 commit 시 수동 갱신) =====
+// 화면 표시는 지도 좌측 하단 오버레이에서 처리 (build-ver-overlay)
+const BUILD_VERSION = '2026-05-16';
+try {
+  console.log('%c🌬 snoopy-windy', 'font-weight:bold;color:#2563eb', 'v' + BUILD_VERSION);
+} catch (_) {}
+
 // ===== PWA manifest 동적 주입 (단일 HTML 유지) =====
 (function injectManifest() {
   const iconSvg = "data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='32' fill='%232563eb'/%3E%3Cg stroke='%23ffffff' stroke-width='10' fill='none' stroke-linecap='round'%3E%3Cpath d='M28 70 Q70 56 110 70 T172 78'/%3E%3Cpath d='M28 100 Q70 86 110 100 T172 108'/%3E%3Cpath d='M28 130 Q70 116 110 130 T172 138'/%3E%3C/g%3E%3C/svg%3E";
@@ -771,6 +791,21 @@ const tempLayer  = L.layerGroup().addTo(map);
 const markerLayer = L.layerGroup().addTo(map);
 const hoverLayer = L.layerGroup().addTo(map);
 const currentLocLayer = L.layerGroup().addTo(map);
+
+// 빌드 버전 오버레이 (지도 좌측 하단, 패널 접힘/추적 모드에서도 식별용)
+(function addBuildVersionOverlay() {
+  const Ctrl = L.Control.extend({
+    options: { position: 'bottomleft' },
+    onAdd: () => {
+      const div = L.DomUtil.create('div', 'build-ver-overlay');
+      div.textContent = 'v' + BUILD_VERSION;
+      div.title = '빌드 버전 — 캐시된 구버전 식별용';
+      L.DomEvent.disableClickPropagation(div);
+      return div;
+    }
+  });
+  new Ctrl().addTo(map);
+})();
 
 // 폴리라인 이벤트 위임 (13K 개별 핸들러 → 그룹 1개) + same-segment 스킵
 let _lastPolyHoverSeg = null;
