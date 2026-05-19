@@ -249,6 +249,31 @@
   #elevToggle:hover { transform:translateY(-1px); filter:brightness(1.1); }
   #elevation.hidden, #elevResizer.hidden, #elevToggle.hidden { display:none !important; }
 
+  /* 추적 정보 박스 (지도 우상단, 마커와 경로를 가리지 않음) */
+  .leaflet-control.track-info-box {
+    background: rgba(15,23,42,0.92);
+    color: #fff;
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 12.5px;
+    font-weight: 600;
+    line-height: 1.7;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+    min-width: 160px;
+    max-width: 260px;
+    display: none;
+    margin: 10px 10px 0 0 !important;
+    border: 1px solid rgba(255,255,255,0.08);
+  }
+  .leaflet-control.track-info-box.visible { display: block; }
+  .leaflet-control.track-info-box .lbl { color: #94a3b8; margin-right: 6px; font-weight: 500; font-size: 11.5px; }
+  .leaflet-control.track-info-box .tail { color: #3b82f6; }
+  .leaflet-control.track-info-box .head { color: #ef4444; }
+  @media (max-width: 768px) {
+    .leaflet-control.track-info-box { font-size:11.5px; padding:6px 10px; line-height:1.6; min-width:140px; }
+    .leaflet-control.track-info-box .lbl { font-size:10.5px; }
+  }
+
   /* 지도 상단 정보 바 (추적 모드 — 기온·ETA·누적) */
   #mapHeader {
     flex-shrink: 0;
@@ -617,7 +642,7 @@
       flex-basis:100%; margin-top:2px;
     }
     #bestResult { font-size:11px; flex-basis:100%; }
-    #findBestTime, #aiPrompt { padding:0 10px; }
+    #findBestTime, #aiPrompt { display:none !important; }
     #gauge { padding:6px 10px; gap:8px; font-size:10.5px; }
     #gauge .tail-pct, #gauge .head-pct { min-width:110px; }
     #stats { gap:4px; padding:5px 8px; font-size:11px; }
@@ -785,6 +810,9 @@
 // ===== 빌드 버전 (캐시된 구버전 식별용 — 매 commit 시 수동 갱신) =====
 // 화면 표시는 지도 좌측 하단 오버레이에서 처리 (build-ver-overlay)
 const BUILD_VERSION = '2026-05-20';
+
+// 메인 그래프에 풍 영향 보정 속도 라인을 그릴지 여부 (기본 off)
+let SHOW_SPEED_LINE = false;
 try {
   console.log('%c🌬 snoopy-windy', 'font-weight:bold;color:#2563eb', 'v' + BUILD_VERSION);
 } catch (_) {}
@@ -1251,9 +1279,13 @@ function renderWindGraph(segments) {
   btn.addEventListener('click', () => {
     const hidden = div.classList.toggle('hidden');
     btn.classList.toggle('active', !hidden);
+    SHOW_SPEED_LINE = !hidden;          // 메인 그래프 속도 라인 동기 토글
     setTimeout(() => map.invalidateSize(), 50);
-    if (!hidden && lastSegments) {
-      setTimeout(() => renderWindGraph(lastSegments), 60);
+    if (lastSegments) {
+      // 메인 그래프 다시 그리기 (속도 라인 표시/숨김 반영)
+      setTimeout(() => renderElevation(lastSegments, lastAvgKmh), 60);
+      // 바람 막대 그래프 (켜진 경우만)
+      if (!hidden) setTimeout(() => renderWindGraph(lastSegments), 80);
     }
   });
 })();
@@ -1342,14 +1374,29 @@ function updateMapHeader(lat, lon) {
   div.innerHTML = parts.join('');
 }
 
+// 추적 정보 박스 (지도 우상단 L.control)
+let trackInfoControl = null;
+let trackInfoDiv = null;
+function ensureTrackInfoControl() {
+  if (trackInfoControl) return;
+  trackInfoControl = L.control({ position: 'topright' });
+  trackInfoControl.onAdd = function() {
+    const div = L.DomUtil.create('div', 'leaflet-control track-info-box');
+    L.DomEvent.disableClickPropagation(div);
+    L.DomEvent.disableScrollPropagation(div);
+    trackInfoDiv = div;
+    return div;
+  };
+  trackInfoControl.addTo(map);
+}
+
 function updateTrackTooltip(lat, lon, heading, speedMs) {
-  if (!currentLocMarker) return;
+  ensureTrackInfoControl();
+  if (!trackInfoDiv) return;
   const lines = [];
-  // 이동 속도 (m/s → km/h)
   if (typeof speedMs === 'number' && speedMs >= 0) {
     lines.push(`<span class="lbl">속도</span>${(speedMs * 3.6).toFixed(1)} km/h`);
   }
-  // 경사도 (가장 가까운 segment 기준)
   if (analysis) {
     const s = findNearestSegment(analysis.segments, lat, lon);
     if (s && typeof s.grade === 'number') {
@@ -1375,30 +1422,15 @@ function updateTrackTooltip(lat, lon, heading, speedMs) {
       lines.push(`<span class="lbl">풍 효과</span><span class="${cls}">${(score*100).toFixed(0)}% ${tag}</span>`);
     }
   }
-  // 기온·ETA·누적은 마커 툴팁에서 빼고 지도 상단 정보바로 이동
   updateMapHeader(lat, lon);
-  const html = lines.join('<br>');
-  // 영구 tooltip이 없으면 새로 bind
-  if (!currentLocMarker._trackTooltipBound) {
-    currentLocMarker.unbindTooltip();
-    currentLocMarker.bindTooltip(html, {
-      permanent: true,
-      direction: 'bottom',
-      offset: [0, 60],
-      className: 'track-tooltip'
-    });
-    currentLocMarker._trackTooltipBound = true;
-  } else {
-    currentLocMarker.setTooltipContent(html);
-  }
+  trackInfoDiv.innerHTML = lines.join('<br>');
+  trackInfoDiv.classList.add('visible');
 }
 
 function clearTrackTooltip() {
-  if (currentLocMarker && currentLocMarker._trackTooltipBound) {
-    currentLocMarker.unbindTooltip();
-    currentLocMarker._trackTooltipBound = false;
-    // 기본 호버 툴팁 복원
-    currentLocMarker.bindTooltip('현재 위치', { direction: 'top', offset: [0, -8] });
+  if (trackInfoDiv) {
+    trackInfoDiv.classList.remove('visible');
+    trackInfoDiv.innerHTML = '';
   }
 }
 
@@ -1727,6 +1759,71 @@ let currentTrackProgressKm = null;
 let trackLastGraphKm = null;
 let trackSpeedPrev = null;   // 이동 속도 추정용 이전 위치/시각
 
+// 추적 중 stats pill을 "주행 + 남은" 형태로 갱신 (fromKm=0이면 전체 기준 복원)
+function updateRemainingWindStats(fromKm) {
+  if (!lastSegments || !lastSegments.length) return;
+  const tracking = (typeof fromKm === 'number' && fromKm > 0);
+
+  let tailRem = 0, headRem = 0, totalRem = 0;
+  let ascDone = 0, ascRem = 0, descDone = 0, descRem = 0;
+  let totalDist = 0;
+  for (const s of lastSegments) {
+    totalDist += s.distance;
+    const past = tracking && (s.cumDistance / 1000 < fromKm);
+    // 상승/하강
+    if (typeof s.grade === 'number') {
+      const dz = (s.grade / 100) * s.distance;
+      if (dz > 0) { if (past) ascDone += dz; else ascRem += dz; }
+      else        { if (past) descDone += -dz; else descRem += -dz; }
+    }
+    // 풍 (남은 구간만)
+    if (!past) {
+      totalRem += s.distance;
+      if (typeof s.score === 'number') {
+        if (s.score >  0.1) tailRem += s.distance;
+        else if (s.score < -0.1) headRem += s.distance;
+      }
+    }
+  }
+  const ascTotal  = ascDone + ascRem;
+  const descTotal = descDone + descRem;
+  const pct = m => totalRem ? (m / totalRem * 100).toFixed(1) + '%' : '-';
+
+  // 거리 pill
+  const distEl = document.querySelector('#stats .dist-pill');
+  if (distEl) {
+    if (tracking) {
+      distEl.innerHTML = `<strong>거리</strong> 주행 ${fromKm.toFixed(1)} / 총 ${(totalDist/1000).toFixed(1)} km`;
+    } else {
+      distEl.innerHTML = `<strong>총 거리</strong> ${(totalDist/1000).toFixed(1)} km`;
+    }
+  }
+  // 상승 pill
+  const ascEl = document.querySelector('#stats .asc-pill');
+  if (ascEl) {
+    if (tracking) {
+      ascEl.innerHTML = `<strong>↗ 상승</strong> 주행 ${ascDone.toFixed(0)} / 총 ${ascTotal.toFixed(0)} m`;
+    } else {
+      ascEl.innerHTML = `<strong>↗ 상승</strong> ${ascTotal.toFixed(0)} m`;
+    }
+  }
+  // 하강 pill
+  const descEl = document.querySelector('#stats .desc-pill');
+  if (descEl) {
+    if (tracking) {
+      descEl.innerHTML = `<strong>↘ 하강</strong> 주행 ${descDone.toFixed(0)} / 총 ${descTotal.toFixed(0)} m`;
+    } else {
+      descEl.innerHTML = `<strong>↘ 하강</strong> ${descTotal.toFixed(0)} m`;
+    }
+  }
+  // 순풍/역풍 pill (남은 구간 기준)
+  const tailEl = document.querySelector('#stats .tail-pill');
+  const headEl = document.querySelector('#stats .head-pill');
+  const wLabel = tracking ? '남은 ' : '';
+  if (tailEl) tailEl.innerHTML = `<strong>${wLabel}순풍 구간</strong> ${(tailRem/1000).toFixed(1)}km (${pct(tailRem)})`;
+  if (headEl) headEl.innerHTML = `<strong>${wLabel}역풍 구간</strong> ${(headRem/1000).toFixed(1)}km (${pct(headRem)})`;
+}
+
 function computeTrackSpeed(lat, lon, gpsSpeed) {
   // GPS가 속도 값을 주면 그대로 사용 (m/s)
   if (typeof gpsSpeed === 'number' && gpsSpeed >= 0 && isFinite(gpsSpeed)) return gpsSpeed;
@@ -1945,19 +2042,19 @@ function renderStats(segments, startMs, totalH, avgKmh, kin) {
   if (!isFinite(minGrade)) minGrade = 0;
   const avgWindKmh = distAcc ? avgWindAcc / distAcc : 0;
   const pct = m => totalM ? (m / totalM * 100).toFixed(1) + '%' : '-';
-  const fmt = d => d.toLocaleString('ko-KR', { hour12: false });
+  const pad2 = n => String(n).padStart(2, '0');
+  const fmtHHMM = d => `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 
   document.getElementById('stats').innerHTML = `
-    <span class="stat-pill"><strong>총 거리</strong> ${(totalM/1000).toFixed(1)} km</span>
+    <span class="stat-pill dist-pill"><strong>총 거리</strong> ${(totalM/1000).toFixed(1)} km</span>
     <span class="stat-pill"><strong>예상 소요</strong> ${formatDuration(totalH)}</span>
-    <span class="stat-pill"><strong>도착 예상</strong> ${fmt(new Date(arriveMs))}</span>
+    <span class="stat-pill"><strong>도착 예상</strong> ${fmtHHMM(new Date(arriveMs))}</span>
     <span class="stat-pill"><strong>평균 속도</strong> ${avgKmh.toFixed(1)} km/h</span>
     <span class="stat-pill"><strong>평균 풍속</strong> ${(avgWindKmh/3.6).toFixed(1)} m/s</span>
-    ${kin && kin.restCount > 0 ? `<span class="stat-pill" style="background:#fff3d6; color:#7a4a00;"><strong>휴식</strong> ${kin.restCount}회 · 총 ${restMin}분 (라이딩 ${formatDuration(ridingMin/60)})</span>` : ''}
-    <span class="stat-pill" style="background:#d6f6ff; color:#005f7a;"><strong>순풍 구간</strong> ${(tailDist/1000).toFixed(1)}km (${pct(tailDist)})</span>
-    <span class="stat-pill" style="background:#fde0ec; color:#7a0033;"><strong>역풍 구간</strong> ${(headDist/1000).toFixed(1)}km (${pct(headDist)})</span>
-    ${totalAscent > 0 ? `<span class="stat-pill" style="background:#dcfce7; color:#14532d;"><strong>↗ 상승</strong> ${totalAscent.toFixed(0)} m</span>` : ''}
-    ${totalDescent > 0 ? `<span class="stat-pill" style="background:#e0e7ff; color:#312e81;"><strong>↘ 하강</strong> ${totalDescent.toFixed(0)} m</span>` : ''}
+    <span class="stat-pill tail-pill" style="background:#d6f6ff; color:#005f7a;"><strong>순풍 구간</strong> ${(tailDist/1000).toFixed(1)}km (${pct(tailDist)})</span>
+    <span class="stat-pill head-pill" style="background:#fde0ec; color:#7a0033;"><strong>역풍 구간</strong> ${(headDist/1000).toFixed(1)}km (${pct(headDist)})</span>
+    ${totalAscent > 0 ? `<span class="stat-pill asc-pill" style="background:#dcfce7; color:#14532d;"><strong>↗ 상승</strong> ${totalAscent.toFixed(0)} m</span>` : ''}
+    ${totalDescent > 0 ? `<span class="stat-pill desc-pill" style="background:#e0e7ff; color:#312e81;"><strong>↘ 하강</strong> ${totalDescent.toFixed(0)} m</span>` : ''}
     ${(maxGrade > 0 || minGrade < 0) ? `<span class="stat-pill" style="background:#f1f5f9;"><strong>경사</strong> 최대 ${maxGrade.toFixed(1)}% / ${minGrade.toFixed(1)}%</span>` : ''}
   `;
 }
@@ -2435,20 +2532,22 @@ function renderElevation(segments, baseSpeed) {
     bg.lineWidth = 1; bg.setLineDash([4, 3]);
     bg.beginPath(); bg.moveTo(padL, yV(baseSpeed)); bg.lineTo(W - padR, yV(baseSpeed)); bg.stroke();
     bg.setLineDash([]);
-    // 속도 라인 (색상별 batch)
+    // 속도 라인 (풍 영향) — 기본 off, SHOW_SPEED_LINE = true 시 표시
     const vPaths = new Map();
-    let prevV = null, prevKm = 0;
-    for (const s of segments) {
-      const km = s.cumDistance / 1000;
-      const v = s.effectiveSpeed;
-      if (typeof v !== 'number') { prevV = null; continue; }
-      if (prevV != null) {
-        const color = (typeof s.score === 'number') ? scoreColor(s.score, s.windSpeed) : '#94a3b8';
-        let coords = vPaths.get(color);
-        if (!coords) { coords = []; vPaths.set(color, coords); }
-        coords.push(xOf(prevKm), yV(prevV), xOf(km), yV(v));
+    if (SHOW_SPEED_LINE) {
+      let prevV = null, prevKm = 0;
+      for (const s of segments) {
+        const km = s.cumDistance / 1000;
+        const v = s.effectiveSpeed;
+        if (typeof v !== 'number') { prevV = null; continue; }
+        if (prevV != null) {
+          const color = (typeof s.score === 'number') ? scoreColor(s.score, s.windSpeed) : '#94a3b8';
+          let coords = vPaths.get(color);
+          if (!coords) { coords = []; vPaths.set(color, coords); }
+          coords.push(xOf(prevKm), yV(prevV), xOf(km), yV(v));
+        }
+        prevV = v; prevKm = km;
       }
-      prevV = v; prevKm = km;
     }
     bg.lineWidth = 2.2; bg.globalAlpha = 0.95;
     for (const [color, coords] of vPaths) {
@@ -2943,6 +3042,8 @@ map.on('zoomstart', () => { if (programmaticMapChange === 0) pauseTrackFollow();
       if (s) {
         const km = s.cumDistance / 1000;
         currentTrackProgressKm = km;
+        // stats 순풍/역풍 pill을 "남은 구간" 기준으로 갱신
+        updateRemainingWindStats(km);
         // 50m 이상 이동 시에만 그래프 view 재설정 (성능)
         if (Math.abs(km - (trackLastGraphKm ?? -999)) >= 0.05 &&
             typeof window._elevSetView === 'function') {
@@ -3001,6 +3102,8 @@ map.on('zoomstart', () => { if (programmaticMapChange === 0) pauseTrackFollow();
     // 경사 그래프 현재위치 마커 제거 + 줌 리셋(전체 범위)
     currentTrackProgressKm = null;
     trackLastGraphKm = null;
+    // stats 순풍/역풍 pill을 전체 기준으로 복원
+    updateRemainingWindStats(0);
     if (typeof window._elevSetView === 'function' && lastSegments && lastSegments.length) {
       const total = lastSegments[lastSegments.length - 1].cumDistance / 1000;
       window._elevSetView(0, total);
