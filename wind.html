@@ -1573,6 +1573,7 @@ let hoverClearTimer = null;
 
 // 경사 그래프 — 현재 추적 위치(km) 및 줌 컨트롤 (renderElevation 내부에서 등록)
 let currentTrackProgressKm = null;
+let trackLastGraphKm = null;
 let elevUpdateMarker = null;
 let elevApplyZoom = null;
 let elevResetZoom = null;
@@ -2323,6 +2324,16 @@ function renderElevation(segments, baseSpeed) {
   drawMarker();
   elevUpdateMarker = drawMarker;
 
+  // 외부에서 X 뷰 범위 변경 (추적 모드 ±1km 슬라이딩용)
+  window._elevSetView = (start, end) => {
+    xViewStart = Math.max(0, start);
+    xViewEnd = Math.min(totalKm, end);
+    if (xViewEnd - xViewStart < 0.1) {  // 너무 좁으면 보호
+      xViewStart = 0; xViewEnd = totalKm;
+    }
+    drawBg(); drawMarker();
+  };
+
   // ===== 줌 적용/리셋 — 그래프 가시 구간을 지도에도 동기화 =====
   let mapSyncTimer = null;
   function syncMapToView(immediate) {
@@ -2748,12 +2759,20 @@ map.on('zoomstart', () => { if (programmaticMapChange === 0) pauseTrackFollow();
     // 4) heading-up 회전 (heading 추정됐을 때만, compass 모드면 compass에 양보)
     if (h != null && !compassMode) applyMapRotation(h);
 
-    // 5) 경사 그래프 — 현재 위치를 가장 가까운 segment에 매핑하여 마커 갱신
+    // 5) 경사 그래프 — 현재 위치를 가장 가까운 segment에 매핑 + ±1km 줌 슬라이딩
     if (lastSegments && lastSegments.length) {
       const s = findNearestSegment(lastSegments, lat, lon);
       if (s) {
-        currentTrackProgressKm = s.cumDistance / 1000;
-        if (typeof elevUpdateMarker === 'function') elevUpdateMarker();
+        const km = s.cumDistance / 1000;
+        currentTrackProgressKm = km;
+        // 50m 이상 이동 시에만 그래프 view 재설정 (성능)
+        if (Math.abs(km - (trackLastGraphKm ?? -999)) >= 0.05 &&
+            typeof window._elevSetView === 'function') {
+          window._elevSetView(km - 1, km + 1);
+          trackLastGraphKm = km;
+        } else if (typeof elevUpdateMarker === 'function') {
+          elevUpdateMarker();
+        }
       }
     }
 
@@ -2788,9 +2807,15 @@ map.on('zoomstart', () => { if (programmaticMapChange === 0) pauseTrackFollow();
     }
     clearMapRotation();
     clearTrackTooltip();
-    // 경사 그래프 현재위치 마커 제거
+    // 경사 그래프 현재위치 마커 제거 + 줌 리셋(전체 범위)
     currentTrackProgressKm = null;
-    if (typeof elevUpdateMarker === 'function') elevUpdateMarker();
+    trackLastGraphKm = null;
+    if (typeof window._elevSetView === 'function' && lastSegments && lastSegments.length) {
+      const total = lastSegments[lastSegments.length - 1].cumDistance / 1000;
+      window._elevSetView(0, total);
+    } else if (typeof elevUpdateMarker === 'function') {
+      elevUpdateMarker();
+    }
     // 자동 팔로우 상태/재개 버튼 정리
     trackAutoFollow = false;
     trackLastFix = null;
