@@ -254,6 +254,22 @@
   #elevToggle:hover { transform:translateY(-1px); filter:brightness(1.1); }
   #elevation.hidden, #elevResizer.hidden, #elevToggle.hidden { display:none !important; }
 
+  /* 재탐색 ON/OFF 토글 */
+  #rerouteToggle {
+    height:36px; padding:0 14px; font-size:13px; font-weight:700; letter-spacing:0.3px;
+    line-height:1;
+    background:linear-gradient(135deg,#06b6d4,#0e7490); color:#fff;
+    border:none; border-radius:8px; cursor:pointer;
+    box-shadow:0 2px 6px rgba(14,116,144,0.3), inset 0 1px 0 rgba(255,255,255,0.18);
+    display:inline-flex; align-items:center; justify-content:center;
+    transition:transform 0.1s, filter 0.15s, background 0.2s;
+  }
+  #rerouteToggle:hover { transform:translateY(-1px); filter:brightness(1.05); }
+  #rerouteToggle.off {
+    background:linear-gradient(135deg,#94a3b8,#64748b);
+    box-shadow:0 2px 6px rgba(100,116,139,0.3), inset 0 1px 0 rgba(255,255,255,0.18);
+  }
+
   /* 다크 모드 토글 버튼 */
   #darkToggle {
     height:36px; width:36px; padding:0; font-size:16px; line-height:1;
@@ -637,11 +653,12 @@
   #panel.collapsed > label,
   #panel.collapsed > .panel-break { display: none !important; }
 
-  /* 접기 모드 + 추적 모드 — 분석/현재위치/최적시각/AI 프롬프트 버튼 숨김 (화면 정리) */
+  /* 접기 모드 + 추적 모드 — 분석/현재위치/최적시각/AI 프롬프트/재탐색 버튼 숨김 (화면 정리) */
   #panel:is(.tracking, .collapsed) #run,
   #panel:is(.tracking, .collapsed) #useCurrentLoc,
   #panel:is(.tracking, .collapsed) #findBestTime,
-  #panel:is(.tracking, .collapsed) #aiPrompt { display: none !important; }
+  #panel:is(.tracking, .collapsed) #aiPrompt,
+  #panel:is(.tracking, .collapsed) #rerouteToggle { display: none !important; }
 
   /* 추적 중 stats: 평균 풍속/순풍/역풍은 지도 상단 정보바로 이동 → 숨김 */
   #stats.tracking .avg-wind-pill,
@@ -800,6 +817,7 @@
   <button id="run">분석</button>
   <button id="useCurrentLoc" type="button" title="현재 GPS 위치에서 가장 가까운 GPX 지점부터 분석합니다">📍 현재위치 기준</button>
   <button id="trackToggle" type="button" title="GPS 위치 변화에 따라 지도가 자동으로 따라갑니다">🛰 추적 시작</button>
+  <button id="rerouteToggle" type="button" title="추적 시작 시 현재 위치 기준으로 코스 앞부분을 자동으로 잘라내고 재분석">🔄 재탐색 ON</button>
   <button id="compassToggle" type="button" title="폰 나침반(자기 센서) 방향으로 지도를 회전 — 정지 상태에서도 폰 돌리면 따라옴">🧭 나침반</button>
   <button id="findBestTime" type="button" disabled>⏱ 최적 시각</button>
   <button id="aiPrompt" type="button" disabled>🤖 AI 프롬프트</button>
@@ -1276,6 +1294,22 @@ function autoCollapseOnMobile() {
 }
 
 // 📊 하단 그래프 표시/숨김 토글
+// 🔄 추적 시작 시 자동 재탐색 ON/OFF (기본 ON)
+let trackAutoReroute = (localStorage.getItem('wind_auto_reroute') !== '0');
+(function setupRerouteToggle() {
+  const btn = document.getElementById('rerouteToggle');
+  const refresh = () => {
+    btn.classList.toggle('off', !trackAutoReroute);
+    btn.textContent = `🔄 재탐색 ${trackAutoReroute ? 'ON' : 'OFF'}`;
+  };
+  refresh();
+  btn.addEventListener('click', () => {
+    trackAutoReroute = !trackAutoReroute;
+    localStorage.setItem('wind_auto_reroute', trackAutoReroute ? '1' : '0');
+    refresh();
+  });
+})();
+
 // 🌙 다크 모드 토글
 (function setupDarkToggle() {
   const btn = document.getElementById('darkToggle');
@@ -3363,8 +3397,8 @@ map.on('zoomstart', () => { if (programmaticMapChange === 0) pauseTrackFollow();
       document.getElementById('status').textContent = '브라우저가 위치 API를 지원하지 않습니다.';
       return;
     }
-    // GPX + 분석이 있으면 현재 위치 기준 자동 재탐색 후 추적 시작
-    if (gpxText && analysis) {
+    // 재탐색 ON + GPX/분석이 있으면 자동으로 현재 위치 기준 재분석 후 추적
+    if (trackAutoReroute && gpxText && analysis) {
       _autoTrackAfterRun = true;
       document.getElementById('useCurrentLoc').click();
     } else {
