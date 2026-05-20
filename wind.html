@@ -653,12 +653,12 @@
   #panel.collapsed > label,
   #panel.collapsed > .panel-break { display: none !important; }
 
-  /* 접기 모드 + 추적 모드 — 분석/현재위치/최적시각/AI 프롬프트/재탐색 버튼 숨김 (화면 정리) */
+  /* 접기 모드 + 추적 모드 — 분석/현재위치/최적시각/AI 프롬프트 버튼 숨김 (화면 정리) */
+  /* 재탐색 토글은 추적 중에도 보이도록 유지 — 다음 추적/재탐색 시 적용 */
   #panel:is(.tracking, .collapsed) #run,
   #panel:is(.tracking, .collapsed) #useCurrentLoc,
   #panel:is(.tracking, .collapsed) #findBestTime,
-  #panel:is(.tracking, .collapsed) #aiPrompt,
-  #panel:is(.tracking, .collapsed) #rerouteToggle { display: none !important; }
+  #panel:is(.tracking, .collapsed) #aiPrompt { display: none !important; }
 
   /* 추적 중 stats: 평균 풍속/순풍/역풍은 지도 상단 정보바로 이동 → 숨김 */
   #stats.tracking .avg-wind-pill,
