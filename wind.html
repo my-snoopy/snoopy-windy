@@ -865,7 +865,7 @@
 
 // ===== 빌드 버전 (캐시된 구버전 식별용 — 매 commit 시 수동 갱신) =====
 // 화면 표시는 지도 좌측 하단 오버레이에서 처리 (build-ver-overlay)
-const BUILD_VERSION = '2026-05-20';
+const BUILD_VERSION = '2026-05-30';
 
 // 메인 그래프에 풍 영향 보정 속도 라인을 그릴지 여부 (기본 off)
 let SHOW_SPEED_LINE = false;
@@ -1175,13 +1175,15 @@ async function fetchCurrentWindForTracking(lat, lon) {
 }
 
 let lastKnownHeading = null;  // 마지막으로 알려진 진행 방향 (정지 중에도 유지)
-function computeTrackHeading(lat, lon, gpsHeading) {
+function computeTrackHeading(lat, lon, gpsHeading, gpsSpeed) {
   let h = null;
-  // 1) GPS heading 우선
-  if (typeof gpsHeading === 'number' && !isNaN(gpsHeading) && gpsHeading >= 0) {
+  // GPS heading은 일정 속도 이상(0.5 m/s ≈ 1.8 km/h)일 때만 신뢰
+  //   정지 상태에서 GPS heading=0 (정북) 또는 부정확한 값을 반환하는 경우 회피
+  const speedOk = typeof gpsSpeed === 'number' && gpsSpeed > 0.5;
+  if (speedOk && typeof gpsHeading === 'number' && !isNaN(gpsHeading) && gpsHeading >= 0) {
     h = gpsHeading;
   }
-  // 2) 이전 위치와 2m 이상 이동 시 bearing 계산
+  // 이전 위치와 2m 이상 이동 시 bearing 계산
   else if (trackHeadingPrev) {
     const d = haversine(trackHeadingPrev, { lat, lon });
     if (d > 2) {
@@ -1190,12 +1192,11 @@ function computeTrackHeading(lat, lon, gpsHeading) {
   }
   if (h != null) {
     trackHeadingPrev = { lat, lon };
-    lastKnownHeading = h;  // 캐시 갱신
+    lastKnownHeading = h;
     return h;
   }
-  // 새 heading 계산 못 했으면 trackHeadingPrev 초기 설정 + 캐시 유지
   if (!trackHeadingPrev) trackHeadingPrev = { lat, lon };
-  return lastKnownHeading;  // 정지 중에도 마지막 heading 반환 → 회전 유지
+  return lastKnownHeading;
 }
 
 function applyMapRotation(heading) {
@@ -3365,7 +3366,7 @@ map.on('zoomstart', () => { if (programmaticMapChange === 0) pauseTrackFollow();
   function onPos(pos) {
     const lat = pos.coords.latitude;
     const lon = pos.coords.longitude;
-    const h = computeTrackHeading(lat, lon, pos.coords.heading);
+    const h = computeTrackHeading(lat, lon, pos.coords.heading, pos.coords.speed);
     trackLastFix = { lat, lon };
 
     // 1) 자동 팔로우 ON일 때만 지도 이동 — 첫 fix는 즉시 setView (animate 없이)
