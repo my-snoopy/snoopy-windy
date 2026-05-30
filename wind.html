@@ -496,21 +496,26 @@
   .modal-link:hover { text-decoration:underline; }
   .modal-link + .modal-link { margin-left:14px; }
 
-  #map { background:#eaeaea; overflow:hidden; position:relative; }
-  #map .leaflet-container {
-    transition: transform 0.5s cubic-bezier(0.2, 0, 0.2, 1);
+  /* 회전된 지도가 헤더/푸터를 침범하지 않도록 강력 paint clipping */
+  #map {
+    background:#eaeaea;
+    overflow:hidden;
+    position:relative;
+    isolation:isolate;
+    contain: layout paint;
+  }
+  /* 회전 전용 wrapper. 이 안에 leaflet-map-pane만 들어가서 회전.
+     컨트롤(.leaflet-control-container)은 wrapper 밖에 있어 회전 영향 0. */
+  #map .map-rotator {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
     transform-origin: center center;
-  }
-  /* 회전된 지도 위에서 개별 컨트롤만 reverse rotate로 똑바로 유지.
-     컨테이너 단위로 걸면 #map overflow 경계를 넘어 헤더/푸터를 가리는 부작용 발생 */
-  #map .leaflet-control {
-    transform: rotate(calc(-1 * var(--map-rot, 0deg)));
     transition: transform 0.5s cubic-bezier(0.2, 0, 0.2, 1);
+    will-change: transform;
+    pointer-events: none;
   }
-  #map .leaflet-top.leaflet-left .leaflet-control    { transform-origin: top left; }
-  #map .leaflet-top.leaflet-right .leaflet-control   { transform-origin: top right; }
-  #map .leaflet-bottom.leaflet-left .leaflet-control { transform-origin: bottom left; }
-  #map .leaflet-bottom.leaflet-right .leaflet-control{ transform-origin: bottom right; }
+  #map .map-rotator > * { pointer-events: auto; }
 
   #elevResizer {
     height:7px; background:#e6e6e6; cursor:row-resize;
@@ -878,7 +883,7 @@
 
 // ===== 빌드 버전 (캐시된 구버전 식별용 — 매 commit 시 수동 갱신) =====
 // 화면 표시는 지도 좌측 하단 오버레이에서 처리 (build-ver-overlay)
-const BUILD_VERSION = '2026-05-30d';
+const BUILD_VERSION = '2026-05-30f';
 
 // 메인 그래프에 풍 영향 보정 속도 라인을 그릴지 여부 (기본 off)
 let SHOW_SPEED_LINE = false;
@@ -1212,6 +1217,23 @@ function computeTrackHeading(lat, lon, gpsHeading, gpsSpeed) {
   return lastKnownHeading;
 }
 
+// .leaflet-map-pane을 회전 전용 wrapper로 감싸기 (1회 setup).
+// 이렇게 하면 panes만 회전하고 .leaflet-control-container는 회전 영향 X.
+let mapRotator = null;
+function ensureMapRotator() {
+  if (mapRotator) return mapRotator;
+  if (typeof map === 'undefined' || !map.getContainer) return null;
+  const lc = map.getContainer();
+  const mapPane = lc.querySelector('.leaflet-map-pane');
+  if (!mapPane) return null;
+  const wrap = document.createElement('div');
+  wrap.className = 'map-rotator';
+  lc.insertBefore(wrap, mapPane);
+  wrap.appendChild(mapPane);
+  mapRotator = wrap;
+  return wrap;
+}
+
 function applyMapRotation(heading) {
   if (heading == null || isNaN(heading)) return;
   // 각도 EMA smoothing (wrap 처리)
@@ -1220,12 +1242,12 @@ function applyMapRotation(heading) {
     const diff = ((heading - trackHeadingSmooth + 540) % 360) - 180;
     trackHeadingSmooth = (trackHeadingSmooth + 0.4 * diff + 360) % 360;
   }
-  // leaflet 표준 API로 container 획득
-  const c = (typeof map !== 'undefined' && map.getContainer) ? map.getContainer() : null;
-  if (c) {
+  const wrap = ensureMapRotator();
+  if (wrap) {
     const deg = -trackHeadingSmooth;
-    c.style.setProperty('--map-rot', deg + 'deg');
-    c.style.transform = `rotate(${deg}deg)`;
+    const rot = `rotate(${deg}deg)`;
+    wrap.style.transform = rot;
+    wrap.style.webkitTransform = rot; // Safari 모바일
   }
 }
 
@@ -1233,10 +1255,9 @@ function clearMapRotation() {
   trackHeadingSmooth = null;
   trackHeadingPrev = null;
   lastKnownHeading = null;
-  const c = (typeof map !== 'undefined' && map.getContainer) ? map.getContainer() : null;
-  if (c) {
-    c.style.setProperty('--map-rot', '0deg');
-    c.style.transform = '';
+  if (mapRotator) {
+    mapRotator.style.transform = '';
+    mapRotator.style.webkitTransform = '';
   }
 }
 
