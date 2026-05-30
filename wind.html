@@ -865,7 +865,7 @@
 
 // ===== 빌드 버전 (캐시된 구버전 식별용 — 매 commit 시 수동 갱신) =====
 // 화면 표시는 지도 좌측 하단 오버레이에서 처리 (build-ver-overlay)
-const BUILD_VERSION = '2026-05-30';
+const BUILD_VERSION = '2026-05-30b';
 
 // 메인 그래프에 풍 영향 보정 속도 라인을 그릴지 여부 (기본 off)
 let SHOW_SPEED_LINE = false;
@@ -1207,7 +1207,8 @@ function applyMapRotation(heading) {
     const diff = ((heading - trackHeadingSmooth + 540) % 360) - 180;
     trackHeadingSmooth = (trackHeadingSmooth + 0.4 * diff + 360) % 360;
   }
-  const c = document.querySelector('#map .leaflet-container');
+  // leaflet 표준 API로 container 획득
+  const c = (typeof map !== 'undefined' && map.getContainer) ? map.getContainer() : null;
   if (c) c.style.transform = `rotate(${-trackHeadingSmooth}deg)`;
 }
 
@@ -3391,13 +3392,15 @@ map.on('zoomstart', () => { if (programmaticMapChange === 0) pauseTrackFollow();
       updateTrackTooltip(lat, lon, h, speedMs);
     });
     // 4) heading-up 회전 (compass 모드 OFF일 때만)
-    //    GPS heading > GPX 가까운 segment의 bearing > 마지막 알려진 heading
+    //    분석된 GPX가 있으면 segment.bearing 우선 (GPS heading=0 정북 fallback 회피)
+    //    그 외 GPS heading
     if (!compassMode) {
-      let headingForRotation = h;
-      if (headingForRotation == null && lastSegments && lastSegments.length) {
+      let headingForRotation = null;
+      if (lastSegments && lastSegments.length) {
         const seg = findNearestSegment(lastSegments, lat, lon);
         if (seg && typeof seg.bearing === 'number') headingForRotation = seg.bearing;
       }
+      if (headingForRotation == null) headingForRotation = h;
       if (headingForRotation != null) applyMapRotation(headingForRotation);
     }
 
