@@ -883,7 +883,7 @@
 
 // ===== 빌드 버전 (캐시된 구버전 식별용 — 매 commit 시 수동 갱신) =====
 // 화면 표시는 지도 좌측 하단 오버레이에서 처리 (build-ver-overlay)
-const BUILD_VERSION = '2026-05-30f';
+const BUILD_VERSION = '2026-05-31a';
 
 // 메인 그래프에 풍 영향 보정 속도 라인을 그릴지 여부 (기본 off)
 let SHOW_SPEED_LINE = false;
@@ -1231,7 +1231,54 @@ function ensureMapRotator() {
   lc.insertBefore(wrap, mapPane);
   wrap.appendChild(mapPane);
   mapRotator = wrap;
+  setupRotatedDragHandler();
   return wrap;
+}
+
+// 회전 활성 상태에서 사용자 panning이 화면 기준이 되도록 자체 drag handler.
+// leaflet 기본 drag는 회전 모르므로 회전 시 disable + 우리가 inverse rotate 후 panBy.
+let rotDragSetup = false;
+let rotDragPos = null;
+let rotMouseDown = false;
+let leafletDragWasEnabled = false;
+function setupRotatedDragHandler() {
+  if (rotDragSetup || typeof map === 'undefined' || !map.getContainer) return;
+  rotDragSetup = true;
+  const el = map.getContainer();
+  function getXY(e) {
+    if (e.touches && e.touches.length) return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+    return { x: e.clientX, y: e.clientY };
+  }
+  function onStart(e) {
+    if (trackHeadingSmooth == null) return;
+    rotMouseDown = true;
+    rotDragPos = getXY(e);
+  }
+  function onMove(e) {
+    if (!rotMouseDown || !rotDragPos || trackHeadingSmooth == null) return;
+    // 단일 손가락만 처리 (pinch는 leaflet이 처리하도록 패스)
+    if (e.touches && e.touches.length > 1) { rotDragPos = null; return; }
+    const cur = getXY(e);
+    const dxs = cur.x - rotDragPos.x;
+    const dys = cur.y - rotDragPos.y;
+    // 화면 → mapPane 좌표: R(+θ) 적용 (wrap은 rotate(-θ))
+    const rad = trackHeadingSmooth * Math.PI / 180;
+    const cos = Math.cos(rad), sin = Math.sin(rad);
+    const dxm = cos * dxs - sin * dys;
+    const dym = sin * dxs + cos * dys;
+    map.panBy([-dxm, -dym], { animate: false });
+    rotDragPos = cur;
+    if (e.cancelable) e.preventDefault();
+  }
+  function onEnd() { rotMouseDown = false; rotDragPos = null; }
+  el.addEventListener('touchstart', onStart, { passive: true });
+  el.addEventListener('touchmove', onMove, { passive: false });
+  el.addEventListener('touchend', onEnd, { passive: true });
+  el.addEventListener('touchcancel', onEnd, { passive: true });
+  el.addEventListener('mousedown', onStart);
+  el.addEventListener('mousemove', onMove);
+  el.addEventListener('mouseup', onEnd);
+  el.addEventListener('mouseleave', onEnd);
 }
 
 function applyMapRotation(heading) {
@@ -1247,7 +1294,12 @@ function applyMapRotation(heading) {
     const deg = -trackHeadingSmooth;
     const rot = `rotate(${deg}deg)`;
     wrap.style.transform = rot;
-    wrap.style.webkitTransform = rot; // Safari 모바일
+    wrap.style.webkitTransform = rot;
+    // 회전 활성 → leaflet 기본 drag 끔 (우리 자체 handler가 처리)
+    if (typeof map !== 'undefined' && map.dragging && map.dragging.enabled()) {
+      map.dragging.disable();
+      leafletDragWasEnabled = true;
+    }
   }
 }
 
@@ -1258,6 +1310,11 @@ function clearMapRotation() {
   if (mapRotator) {
     mapRotator.style.transform = '';
     mapRotator.style.webkitTransform = '';
+  }
+  // 회전 해제 → leaflet 기본 drag 복구
+  if (leafletDragWasEnabled && typeof map !== 'undefined' && map.dragging) {
+    map.dragging.enable();
+    leafletDragWasEnabled = false;
   }
 }
 
